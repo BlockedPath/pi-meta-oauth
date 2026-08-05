@@ -1,8 +1,14 @@
 {
   "name": "pi-meta-oauth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Meta Model API OAuth provider for pi — device login, API-key minting, and Muse Spark model catalog for pi.dev",
-  "keywords": ["pi-package", "meta", "muse-spark", "oauth", "provider"],
+  "keywords": [
+    "pi-package",
+    "meta",
+    "muse-spark",
+    "oauth",
+    "provider"
+  ],
   "license": "MIT",
   "type": "module",
   "repository": {
@@ -14,7 +20,9 @@
     "url": "https://github.com/BlockedPath/pi-meta-oauth/issues"
   },
   "pi": {
-    "extensions": ["./extensions/meta.ts"],
+    "extensions": [
+      "./extensions/meta.ts"
+    ],
     "image": "https://raw.githubusercontent.com/BlockedPath/pi-meta-oauth/main/preview.png"
   },
   "peerDependencies": {
