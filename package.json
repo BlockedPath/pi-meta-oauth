@@ -14,7 +14,8 @@
     "url": "https://github.com/BlockedPath/pi-meta-oauth/issues"
   },
   "pi": {
-    "extensions": ["./extensions/meta.ts"]
+    "extensions": ["./extensions/meta.ts"],
+    "image": "https://raw.githubusercontent.com/BlockedPath/pi-meta-oauth/main/preview.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.83.0 <0.84.0",
