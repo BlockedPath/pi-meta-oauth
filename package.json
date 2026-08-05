@@ -1,0 +1,33 @@
+{
+  "name": "pi-meta-oauth",
+  "version": "0.1.0",
+  "description": "Meta Model API OAuth provider for pi — device login, API-key minting, and Muse Spark model catalog for pi.dev",
+  "keywords": ["pi-package", "meta", "muse-spark", "oauth", "provider"],
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BlockedPath/pi-meta-oauth"
+  },
+  "homepage": "https://github.com/BlockedPath/pi-meta-oauth#readme",
+  "bugs": {
+    "url": "https://github.com/BlockedPath/pi-meta-oauth/issues"
+  },
+  "pi": {
+    "extensions": ["./extensions/meta.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.83.0 <0.84.0",
+    "@earendil-works/pi-coding-agent": ">=0.83.0 <0.84.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.83.0",
+    "@earendil-works/pi-coding-agent": "0.83.0",
+    "bun-types": "latest",
+    "typescript": "^5.9.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test tests/meta.test.ts"
+  }
+}
