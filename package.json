@@ -13,6 +13,11 @@
   ],
   "license": "MIT",
   "type": "module",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "extensions/"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/BlockedPath/pi-meta-oauth"
