@@ -1,20 +1,22 @@
 <img width="3840" height="2160" alt="Meta-Symbol" src="https://github.com/user-attachments/assets/a3074df9-ad80-40ca-b9b9-944b96dda192" />
+
 # pi-meta-oauth
 
-Meta Model API OAuth provider for [pi](https://pi.dev) — use **Muse Spark** (`muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.1`) via `openai-responses` inside pi.
+Meta Model API OAuth and Muse-style voice input for [pi](https://pi.dev).
 
-- Device authorization (same client as Muse Code) against `https://auth.meta.com`
-- Mints a Model API key via `POST https://api.meta.ai/muse-code/key`
-- Stores OAuth `refresh = identity token` + `access = Model API key` in `~/.pi/agent/auth.json` under provider `meta`
-- Refresh re-mints the Model API key daily
-- Model catalog from `GET https://api.meta.ai/v1/models` with thinking levels `minimal/low/medium/high/xhigh`
+- Use Muse Spark models through Pi's `openai-responses` provider
+- Device authorization against `https://auth.meta.com`
+- Model API-key minting through `POST https://api.meta.ai/muse-code/key`
+- Dynamic Muse model catalog from `GET https://api.meta.ai/v1/models`
+- Toggle-based Meta voice dictation on macOS with a live green input meter
 
 ## Install
 
 ```bash
-# local path (no publish needed)
-pi install ./pi-meta-provider
-# or npm (after publish)
+# Local checkout
+pi install /absolute/path/to/pi-meta-oauth
+
+# npm
 pi install npm:pi-meta-oauth
 
 pi --list-models meta
@@ -22,29 +24,51 @@ pi --list-models meta
 
 ## Login
 
-```bash
-pi
+```text
 /login meta
-# shows device code -> approve in browser -> mints Model API key automatically
 ```
 
-Stored credential shape:
+Pi displays a device code, opens the Meta authorization flow, and mints a Model API key. Credentials are stored by Pi in `~/.pi/agent/auth.json` under provider `meta`:
 
 ```json
 { "meta": { "type": "oauth", "refresh": "<identity>", "access": "<MODEL_API_KEY>", "expires": 123 } }
 ```
 
+The access key is re-minted daily.
+
+## Voice input
+
+Voice mode currently requires macOS. It uses the same Meta credential managed by this provider; a separate Muse login is not required.
+
+1. Press **Alt+V** once to start recording.
+2. Speak while the green microphone meter is visible in Pi's status bar.
+3. Press **Alt+V** again to stop.
+4. The transcript is inserted into Pi's editor for review before submission.
+
+Commands:
+
+- `/voice` — show voice status and privacy behavior
+- `/voice-on` — enable the Alt+V shortcut
+- `/voice-off` — disable voice input
+
+The first recording may trigger the macOS microphone permission prompt. Audio is captured only between the two Alt+V presses and streamed as 16 kHz mono PCM to Muse Code's internal Meta ASR endpoint. No local speech-recognition model is downloaded. The endpoint is undocumented and may change in a future Muse release.
+
+Optional overrides:
+
+- `PI_META_VOICE_ASR_ENDPOINT`
+- `PI_META_VOICE_ASR_MODEL`
+
 ## Models
 
-All three share 1,048,576 context, 256K output, `supportsReasoningEffort: true`, and `input: ["text","image"]`:
+Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh`.
 
 | id | pricing (input/output/cached) $/M |
-|---|---|
+| --- | --- |
 | `muse-spark-1.2` | 1.25 / 4.25 / 0.15 |
 | `muse-spark-1.2-contributor` | 0.10 / 0.20 / 0.002 |
 | `muse-spark-1.1` | 1.25 / 4.25 / 0.15 |
 
-Add to `enabledModels` in `~/.pi/agent/settings.json`:
+To scope Pi's model picker to Meta models:
 
 ```json
 { "enabledModels": ["meta/*"] }
@@ -55,16 +79,20 @@ Add to `enabledModels` in `~/.pi/agent/settings.json`:
 ```bash
 pi --list-models meta
 pi -p --provider meta --model muse-spark-1.2 "Reply exactly: META_OK"
-bun test extensions/meta.test.ts
+bun run typecheck
+bun test
 ```
 
 ## Publish to pi.dev
 
-`pi-package` keyword makes it appear at https://pi.dev/packages
+The `pi-package` keyword makes the package discoverable at <https://pi.dev/packages>.
 
 ```bash
 npm publish --access public
-# users then run: pi install npm:pi-meta-oauth
 ```
 
-See `extensions/meta.ts` for the `registerProvider` / `refreshModels` / `oauth` implementation reused from Muse Code's launcher flow.
+Users can then update with:
+
+```bash
+pi update npm:pi-meta-oauth
+```

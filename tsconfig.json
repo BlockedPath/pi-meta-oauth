@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["bun-types"]
   },
-  "include": ["extensions"]
+  "include": ["extensions", "tests"]
 }

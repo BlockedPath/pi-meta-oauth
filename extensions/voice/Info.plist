@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Pi Meta OAuth Voice</string>
+	<key>CFBundleExecutable</key>
+	<string>pi-meta-oauth-voice-v1</string>
+	<key>CFBundleIdentifier</key>
+	<string>dev.pi.metaoauth.voice</string>
+	<key>CFBundleName</key>
+	<string>Pi Meta OAuth Voice</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2.0</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pi records audio after Alt+V starts voice input and stops when Alt+V is pressed again, then sends it to Meta ASR for transcription.</string>
+</dict>
+</plist>
