@@ -1,3 +1,4 @@
+<img width="3840" height="2160" alt="Meta-Symbol" src="https://github.com/user-attachments/assets/a3074df9-ad80-40ca-b9b9-944b96dda192" />
 # pi-meta-oauth
 
 Meta Model API OAuth provider for [pi](https://pi.dev) — use **Muse Spark** (`muse-spark-1.2`, `muse-spark-1.2-contributor`, `muse-spark-1.1`) via `openai-responses` inside pi.
