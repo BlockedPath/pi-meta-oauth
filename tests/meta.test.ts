@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
 import {
+	createMetaProviderConfig,
 	loginMeta,
 	mintMetaApiKey,
 	toProviderModels,
@@ -43,7 +44,24 @@ describe("Meta OAuth provider", () => {
 			maxTokens: 45_000,
 			cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 			thinkingLevelMap: { off: null, high: "deep", max: null },
+			compat: { supportsReasoningEffort: true, supportsToolSearch: true },
 		});
+	});
+
+	test("enables tool search for fallback models", () => {
+		const models = createMetaProviderConfig().models ?? [];
+
+		expect(models).not.toHaveLength(0);
+		expect(
+			models.every((model) => {
+				const compat = model.compat;
+				return (
+					compat !== undefined &&
+					"supportsToolSearch" in compat &&
+					compat.supportsToolSearch === true
+				);
+			}),
+		).toBe(true);
 	});
 
 	test("runs device login, polls, and mints a Model API key", async () => {

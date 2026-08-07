@@ -3,7 +3,10 @@ import type {
 	OAuthLoginCallbacks,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ProviderConfig } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ProviderConfig,
+} from "@earendil-works/pi-coding-agent";
 
 export const META_PROVIDER_ID = "meta";
 export const META_API_BASE_URL = "https://api.meta.ai/v1";
@@ -60,7 +63,11 @@ interface MetaCatalogModel {
 			modalities?: { input?: string[] };
 			limit?: { context?: number; output?: number };
 			variants?: Record<string, { reasoningEffort?: string }>;
-			cost?: { input?: string | number; output?: string | number; cached?: string | number };
+			cost?: {
+				input?: string | number;
+				output?: string | number;
+				cached?: string | number;
+			};
 		};
 	};
 }
@@ -83,7 +90,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true },
+		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
 	},
 	{
 		id: "muse-spark-1.2-contributor",
@@ -102,7 +109,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true },
+		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
 	},
 	{
 		id: "muse-spark-1.1",
@@ -121,7 +128,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true },
+		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
 	},
 ];
 
@@ -129,7 +136,9 @@ function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function responseBody(response: Response): Promise<Record<string, unknown>> {
+async function responseBody(
+	response: Response,
+): Promise<Record<string, unknown>> {
 	const text = await response.text();
 	if (!text) return {};
 	try {
@@ -157,14 +166,23 @@ async function postForm<T>(
 ): Promise<{ response: Response; body: T & Record<string, unknown> }> {
 	const response = await fetchImpl(url, {
 		method: "POST",
-		headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+		headers: {
+			Accept: "application/json",
+			"Content-Type": "application/x-www-form-urlencoded",
+		},
 		body: new URLSearchParams(fields),
 		redirect: "manual",
 	});
-	return { response, body: (await responseBody(response)) as T & Record<string, unknown> };
+	return {
+		response,
+		body: (await responseBody(response)) as T & Record<string, unknown>,
+	};
 }
 
-export async function mintMetaApiKey(identityToken: string, fetchImpl: Fetch = fetch): Promise<string> {
+export async function mintMetaApiKey(
+	identityToken: string,
+	fetchImpl: Fetch = fetch,
+): Promise<string> {
 	const response = await fetchImpl(API_KEY_MINT_URL, {
 		method: "POST",
 		headers: {
@@ -175,12 +193,18 @@ export async function mintMetaApiKey(identityToken: string, fetchImpl: Fetch = f
 		},
 		body: "{}",
 	});
-	const body = (await responseBody(response)) as MintResponse & Record<string, unknown>;
+	const body = (await responseBody(response)) as MintResponse &
+		Record<string, unknown>;
 	if (!response.ok) {
-		throw new Error(`Meta API-key mint failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`);
+		throw new Error(
+			`Meta API-key mint failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
+		);
 	}
 	if (typeof body.api_key !== "string" || !body.api_key) {
-		const setup = typeof body.action_url === "string" && body.action_url ? ` Complete setup at ${body.action_url}.` : "";
+		const setup =
+			typeof body.action_url === "string" && body.action_url
+				? ` Complete setup at ${body.action_url}.`
+				: "";
 		throw new Error(`Meta did not issue an API key.${setup}`);
 	}
 	return body.api_key;
@@ -204,17 +228,24 @@ export async function loginMeta(
 	}
 	const device = authorization.body;
 	if (!device.device_code || !device.user_code || !device.verification_uri) {
-		throw new Error("Meta device authorization returned an incomplete response");
+		throw new Error(
+			"Meta device authorization returned an incomplete response",
+		);
 	}
 
-	let intervalSeconds = Number.isFinite(device.interval) && Number(device.interval) > 0 ? Number(device.interval) : 5;
-	const expiresInSeconds = Number.isFinite(device.expires_in) && Number(device.expires_in) > 0
-		? Number(device.expires_in)
-		: 900;
+	let intervalSeconds =
+		Number.isFinite(device.interval) && Number(device.interval) > 0
+			? Number(device.interval)
+			: 5;
+	const expiresInSeconds =
+		Number.isFinite(device.expires_in) && Number(device.expires_in) > 0
+			? Number(device.expires_in)
+			: 900;
 	const deadline = Date.now() + expiresInSeconds * 1000;
 	callbacks.onDeviceCode({
 		userCode: device.user_code,
-		verificationUri: device.verification_uri_complete || device.verification_uri,
+		verificationUri:
+			device.verification_uri_complete || device.verification_uri,
 		intervalSeconds,
 		expiresInSeconds,
 	});
@@ -267,7 +298,10 @@ export async function refreshMetaToken(
 	credentials: OAuthCredentials,
 	fetchImpl: Fetch = fetch,
 ): Promise<OAuthCredentials> {
-	if (!credentials.refresh) throw new Error("Meta login is missing its identity token; run /login meta again");
+	if (!credentials.refresh)
+		throw new Error(
+			"Meta login is missing its identity token; run /login meta again",
+		);
 	return {
 		...credentials,
 		access: await mintMetaApiKey(credentials.refresh, fetchImpl),
@@ -276,56 +310,83 @@ export async function refreshMetaToken(
 }
 
 function finitePositive(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+	return typeof value === "number" && Number.isFinite(value) && value > 0
+		? value
+		: fallback;
 }
 
 function numericCost(value: unknown, fallback: number): number {
-	const number = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+	const number =
+		typeof value === "number"
+			? value
+			: typeof value === "string"
+				? Number(value)
+				: Number.NaN;
 	return Number.isFinite(number) && number >= 0 ? number : fallback;
 }
 
 function displayName(id: string): string {
 	return id
 		.split("-")
-		.map((part) => part ? part[0].toUpperCase() + part.slice(1) : part)
+		.map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
 		.join(" ");
 }
 
-export function toProviderModels(catalog: CatalogResponse): MetaProviderModel[] {
+export function toProviderModels(
+	catalog: CatalogResponse,
+): MetaProviderModel[] {
 	return (catalog.data ?? []).flatMap((entry) => {
 		if (typeof entry.id !== "string" || !entry.id) return [];
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
 		const fallback = FALLBACK_MODELS.find((model) => model.id === entry.id);
-		const catalogName = metadata?.name === entry.id ? undefined : metadata?.name;
+		const catalogName =
+			metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
-		const thinkingLevelMap: NonNullable<MetaProviderModel["thinkingLevelMap"]> = {
-			off: null,
-			minimal: variants.minimal?.reasoningEffort ?? "minimal",
-			low: variants.low?.reasoningEffort ?? "low",
-			medium: variants.medium?.reasoningEffort ?? "medium",
-			high: variants.high?.reasoningEffort ?? "high",
-			xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
-			max: null,
-		};
-		return [{
-			id: entry.id,
-			name: catalogName || fallback?.name || displayName(entry.id),
-			reasoning: metadata?.reasoning ?? fallback?.reasoning ?? true,
-			thinkingLevelMap,
-			input: metadata
-				? (metadata.modalities?.input?.includes("image") ? ["text", "image"] : ["text"])
-				: (fallback?.input ?? ["text"]),
-			cost: {
-				input: numericCost(metadata?.cost?.input, fallback?.cost.input ?? 0),
-				output: numericCost(metadata?.cost?.output, fallback?.cost.output ?? 0),
-				cacheRead: numericCost(metadata?.cost?.cached, fallback?.cost.cacheRead ?? 0),
-				cacheWrite: 0,
-			},
-			contextWindow: finitePositive(metadata?.limit?.context, fallback?.contextWindow ?? 1_048_576),
-			maxTokens: finitePositive(metadata?.limit?.output, fallback?.maxTokens ?? 256_000),
-			compat: { supportsReasoningEffort: true },
-		} satisfies MetaProviderModel];
+		const thinkingLevelMap: NonNullable<MetaProviderModel["thinkingLevelMap"]> =
+			{
+				off: null,
+				minimal: variants.minimal?.reasoningEffort ?? "minimal",
+				low: variants.low?.reasoningEffort ?? "low",
+				medium: variants.medium?.reasoningEffort ?? "medium",
+				high: variants.high?.reasoningEffort ?? "high",
+				xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
+				max: null,
+			};
+		return [
+			{
+				id: entry.id,
+				name: catalogName || fallback?.name || displayName(entry.id),
+				reasoning: metadata?.reasoning ?? fallback?.reasoning ?? true,
+				thinkingLevelMap,
+				input: metadata
+					? metadata.modalities?.input?.includes("image")
+						? ["text", "image"]
+						: ["text"]
+					: (fallback?.input ?? ["text"]),
+				cost: {
+					input: numericCost(metadata?.cost?.input, fallback?.cost.input ?? 0),
+					output: numericCost(
+						metadata?.cost?.output,
+						fallback?.cost.output ?? 0,
+					),
+					cacheRead: numericCost(
+						metadata?.cost?.cached,
+						fallback?.cost.cacheRead ?? 0,
+					),
+					cacheWrite: 0,
+				},
+				contextWindow: finitePositive(
+					metadata?.limit?.context,
+					fallback?.contextWindow ?? 1_048_576,
+				),
+				maxTokens: finitePositive(
+					metadata?.limit?.output,
+					fallback?.maxTokens ?? 256_000,
+				),
+				compat: { supportsReasoningEffort: true, supportsToolSearch: true },
+			} satisfies MetaProviderModel,
+		];
 	});
 }
 
@@ -333,21 +394,30 @@ export async function refreshMetaModels(
 	context: RefreshModelsContext,
 	fetchImpl: Fetch = fetch,
 ): Promise<MetaProviderModel[]> {
-	if (!context.allowNetwork || context.signal?.aborted) return [...FALLBACK_MODELS];
-	const apiKey = context.credential?.type === "oauth"
-		? context.credential.access
-		: context.credential?.type === "api_key"
-			? context.credential.key
-			: undefined;
+	if (!context.allowNetwork || context.signal?.aborted)
+		return [...FALLBACK_MODELS];
+	const apiKey =
+		context.credential?.type === "oauth"
+			? context.credential.access
+			: context.credential?.type === "api_key"
+				? context.credential.key
+				: undefined;
 	if (!apiKey) return [...FALLBACK_MODELS];
 
 	const response = await fetchImpl(META_MODEL_CATALOG_URL, {
-		headers: { Accept: "application/json", Authorization: `Bearer ${apiKey}`, "x-api-version": "1.0.0" },
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${apiKey}`,
+			"x-api-version": "1.0.0",
+		},
 		signal: context.signal,
 	});
-	const body = (await responseBody(response)) as CatalogResponse & Record<string, unknown>;
+	const body = (await responseBody(response)) as CatalogResponse &
+		Record<string, unknown>;
 	if (!response.ok) {
-		throw new Error(`Meta model catalog failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`);
+		throw new Error(
+			`Meta model catalog failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
+		);
 	}
 	return toProviderModels(body);
 }
