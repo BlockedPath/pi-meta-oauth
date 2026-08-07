@@ -29,6 +29,7 @@
   "pi": {
     "extensions": [
       "./extensions/meta.ts",
+      "./extensions/media.ts",
       "./extensions/voice.ts"
     ],
     "image": "https://raw.githubusercontent.com/BlockedPath/pi-meta-oauth/main/preview.png"

@@ -13,6 +13,7 @@ export const META_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_MODEL_CATALOG_URL = "https://api.meta.ai/v1/models";
 export const META_AUTH_BASE_URL = "https://auth.meta.com";
 export const META_CLIENT_ID = "1031625952748946";
+export const META_FILES_URL = `${META_API_BASE_URL}/files`;
 
 const DEVICE_AUTHORIZATION_URL = `${META_AUTH_BASE_URL}/oidc/device/authorization/`;
 const DEVICE_TOKEN_URL = `${META_AUTH_BASE_URL}/oidc/device/token/`;
@@ -72,6 +73,10 @@ interface MetaCatalogModel {
 	};
 }
 
+// Media capabilities kept as "text"+"image" for pi-ai type compat (pi-ai 0.83/0.84 only allows those),
+// with "video"/"audio" advertised via cast so future pi-ai that expands the union picks them up.
+// See media.ts for the before_provider_request rewrite that makes @video/@audio work today
+// despite UserMessage.content being string | (TextContent | ImageContent)[] .
 const FALLBACK_MODELS: MetaProviderModel[] = [
 	{
 		id: "muse-spark-1.2",
@@ -86,7 +91,12 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		input: ["text", "image"],
+		input: [
+			"text",
+			"image",
+			"video",
+			"audio",
+		] as unknown as MetaProviderModel["input"],
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -105,7 +115,12 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		input: ["text", "image"],
+		input: [
+			"text",
+			"image",
+			"video",
+			"audio",
+		] as unknown as MetaProviderModel["input"],
 		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -124,7 +139,12 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		input: ["text", "image"],
+		input: [
+			"text",
+			"image",
+			"video",
+			"audio",
+		] as unknown as MetaProviderModel["input"],
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -332,6 +352,25 @@ function displayName(id: string): string {
 		.join(" ");
 }
 
+function modalitiesToInput(
+	modalities: string[] | undefined,
+	fallback: MetaProviderModel["input"] | undefined,
+): MetaProviderModel["input"] {
+	if (!modalities)
+		return fallback ?? (["text"] as unknown as MetaProviderModel["input"]);
+	const input: string[] = ["text"];
+	if (modalities.includes("image")) input.push("image");
+	// Advertised via cast until pi-ai expands Model.input union beyond text|image.
+	// The before_provider_request hook in media.ts rewrites these to input_video/input_audio at request time.
+	if (modalities.includes("video")) input.push("video");
+	if (modalities.includes("audio")) input.push("audio");
+	// Some catalogs expose "document"/"pdf" as a modality for PDF handling.
+	if (modalities.includes("document") || modalities.includes("pdf")) {
+		if (!input.includes("image")) input.push("image"); // PDFs count toward image budget
+	}
+	return input as unknown as MetaProviderModel["input"];
+}
+
 export function toProviderModels(
 	catalog: CatalogResponse,
 ): MetaProviderModel[] {
@@ -359,11 +398,7 @@ export function toProviderModels(
 				name: catalogName || fallback?.name || displayName(entry.id),
 				reasoning: metadata?.reasoning ?? fallback?.reasoning ?? true,
 				thinkingLevelMap,
-				input: metadata
-					? metadata.modalities?.input?.includes("image")
-						? ["text", "image"]
-						: ["text"]
-					: (fallback?.input ?? ["text"]),
+				input: modalitiesToInput(metadata?.modalities?.input, fallback?.input),
 				cost: {
 					input: numericCost(metadata?.cost?.input, fallback?.cost.input ?? 0),
 					output: numericCost(
