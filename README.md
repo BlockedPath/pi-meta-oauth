@@ -2,6 +2,9 @@
 
 # pi-meta-oauth
 
+<!-- markdownlint-disable-next-line MD013 -->
+[![npm version](https://img.shields.io/npm/v/pi-meta-oauth)](https://www.npmjs.com/package/pi-meta-oauth) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![GitHub stars](https://img.shields.io/github/stars/BlockedPath/pi-meta-oauth?style=social)](https://github.com/BlockedPath/pi-meta-oauth/stargazers) [![Last Commit](https://img.shields.io/github/last-commit/BlockedPath/pi-meta-oauth)](https://github.com/BlockedPath/pi-meta-oauth/commits/main) [![Issues](https://img.shields.io/github/issues/BlockedPath/pi-meta-oauth)](https://github.com/BlockedPath/pi-meta-oauth/issues) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/BlockedPath/pi-meta-oauth/pulls) [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://www.conventionalcommits.org/en/v1.0.0/) [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue)](https://www.typescriptlang.org/) [![CI](https://github.com/BlockedPath/pi-meta-oauth/actions/workflows/ci.yml/badge.svg)](https://github.com/BlockedPath/pi-meta-oauth/actions/workflows/ci.yml) [![Pi compatible](https://img.shields.io/badge/pi-Compatible-blueviolet)](https://pi.dev)
+
 Meta Model API OAuth and Muse-style voice input for [pi](https://pi.dev).
 
 - Use Muse Spark models through Pi's `openai-responses` provider
@@ -83,13 +86,19 @@ bun run typecheck
 bun test
 ```
 
-## Publish to pi.dev
+## Publish to npm and pi.dev
 
-The `pi-package` keyword makes the package discoverable at <https://pi.dev/packages>.
+The `pi-package` keyword makes the package discoverable at <https://pi.dev/packages>. Publishing is handled by `.github/workflows/publish.yml` when a non-prerelease GitHub Release is published.
 
-```bash
-npm publish --access public
-```
+Before the first automated release, configure npm trusted publishing for `pi-meta-oauth` with:
+
+- GitHub owner: `BlockedPath`
+- Repository: `pi-meta-oauth`
+- Workflow filename: `publish.yml`
+- Environment: leave blank
+- Allowed action: `npm publish`
+
+Bump `package.json`, then publish a GitHub Release tagged `v<version>`. The workflow verifies that the release tag matches the package version, runs typechecking and tests, and publishes with npm provenance without a long-lived token.
 
 Users can then update with:
 
