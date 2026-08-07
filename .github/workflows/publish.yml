@@ -2,22 +2,20 @@
 name: Publish
 
 "on":
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
 
 permissions: {}
 
 concurrency:
-  group: publish-${{ github.event.release.tag_name }}
+  group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   verify:
     name: Verify package
-    if: >-
-      github.repository == 'BlockedPath/pi-meta-oauth' &&
-      github.event.release.prerelease == false
+    if: github.repository == 'BlockedPath/pi-meta-oauth'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -72,7 +70,7 @@ jobs:
 
       - name: Verify release version
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           package_version="$(node -p "require('./package.json').version")"
           expected_tag="v${package_version}"
@@ -82,13 +80,24 @@ jobs:
             exit 1
           fi
 
-      - name: Verify version is unpublished
+      - name: Check npm registry
+        id: registry
         run: |
           package_name="$(node -p "require('./package.json').name")"
           package_version="$(node -p "require('./package.json').version")"
           package_spec="${package_name}@${package_version}"
-          if npm view "$package_spec" version >/dev/null 2>&1; then
-            printf '::error::%s is already published\n' "$package_spec"
+          published_sha="$(
+            npm view "$package_spec" gitHead 2>/dev/null || true
+          )"
+          if [[ -z "$published_sha" ]]; then
+            echo 'already_published=false' >> "$GITHUB_OUTPUT"
+          elif [[ "$published_sha" == "$GITHUB_SHA" ]]; then
+            printf '::notice::%s already published from this commit\n' \
+              "$package_spec"
+            echo 'already_published=true' >> "$GITHUB_OUTPUT"
+          else
+            printf '::error::%s was published from commit %s\n' \
+              "$package_spec" "$published_sha"
             exit 1
           fi
 
@@ -96,4 +105,30 @@ jobs:
         run: npm pack --dry-run
 
       - name: Publish package
+        if: steps.registry.outputs.already_published != 'true'
         run: npm publish --access public --provenance
+
+  release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - name: Create release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            printf '::notice::GitHub Release %s already exists\n' \
+              "$RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" \
+              --generate-notes \
+              --title "$RELEASE_TAG" \
+              --verify-tag
+          fi
