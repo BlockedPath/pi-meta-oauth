@@ -88,7 +88,7 @@ bun test
 
 ## Publish to npm and pi.dev
 
-The `pi-package` keyword makes the package discoverable at <https://pi.dev/packages>. Publishing is handled by `.github/workflows/publish.yml` when a `v*` tag is pushed.
+The `pi-package` keyword makes the package discoverable at <https://pi.dev/packages>. Publishing is handled by `.github/workflows/publish.yml` when a `v*` tag is pushed. Each release publishes the canonical `pi-meta-oauth` package to npm and a scoped `@blockedpath/pi-meta-oauth` mirror to GitHub Packages.
 
 Before the first automated release, configure npm trusted publishing for `pi-meta-oauth` with:
 
@@ -98,7 +98,9 @@ Before the first automated release, configure npm trusted publishing for `pi-met
 - Environment: leave blank
 - Allowed action: `npm publish`
 
-Bump `package.json`, commit the change, create a `v<version>` tag, and push the commit and tag. The workflow verifies that the tag matches the package version, runs typechecking and tests, publishes to npm with provenance, and creates the GitHub Release. Re-running a partially completed workflow is safe when npm reports that the same commit was already published.
+GitHub Packages uses the workflow's short-lived `GITHUB_TOKEN`. Its npm registry defaults new packages to private visibility; after the first publish, open the package settings on GitHub and change its visibility to **Public** if desired.
+
+Bump `package.json`, commit the change, create a `v<version>` tag, and push the commit and tag. The workflow verifies that the tag matches the package version, runs typechecking and tests, publishes to both registries, and creates the GitHub Release. Re-running a partially completed workflow is safe when either registry reports that the same commit was already published.
 
 Users can then update with:
 

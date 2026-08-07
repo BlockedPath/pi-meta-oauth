@@ -108,9 +108,71 @@ jobs:
         if: steps.registry.outputs.already_published != 'true'
         run: npm publish --access public --provenance
 
+  publish-github:
+    name: Publish to GitHub Packages
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        # actions/checkout v6.1.0
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        # actions/setup-node v6.5.0
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          package-manager-cache: false
+          registry-url: https://npm.pkg.github.com
+          scope: "@blockedpath"
+
+      - name: Set scoped package name
+        run: npm pkg set name="@blockedpath/pi-meta-oauth"
+
+      - name: Check GitHub Packages registry
+        id: github-registry
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          package_name="$(node -p "require('./package.json').name")"
+          package_version="$(node -p "require('./package.json').version")"
+          package_spec="${package_name}@${package_version}"
+          published_sha="$(
+            npm view "$package_spec" gitHead 2>/dev/null || true
+          )"
+          if [[ -z "$published_sha" ]]; then
+            echo 'already_published=false' >> "$GITHUB_OUTPUT"
+          elif [[ "$published_sha" == "$GITHUB_SHA" ]]; then
+            printf '::notice::%s already published from this commit\n' \
+              "$package_spec"
+            echo 'already_published=true' >> "$GITHUB_OUTPUT"
+          else
+            printf '::error::%s was published from commit %s\n' \
+              "$package_spec" "$published_sha"
+            exit 1
+          fi
+
+      - name: Inspect GitHub package contents
+        run: npm pack --dry-run
+
+      - name: Publish GitHub package
+        if: steps.github-registry.outputs.already_published != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: npm publish
+
   release:
     name: Create GitHub Release
-    needs: publish
+    needs:
+      - publish
+      - publish-github
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
