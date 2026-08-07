@@ -52,4 +52,14 @@ describe("Meta voice mode", () => {
 			expect(existsSync(join(root, file))).toBe(true);
 		}
 	});
+
+	test("ships the Windows helper resources", () => {
+		const root = join(
+			dirname(fileURLToPath(import.meta.url)),
+			"../extensions/voice",
+		);
+		for (const file of ["windows-audio.cs", "windows-audio.ps1"]) {
+			expect(existsSync(join(root, file))).toBe(true);
+		}
+	});
 });

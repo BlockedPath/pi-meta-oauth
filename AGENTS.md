@@ -57,7 +57,11 @@ macOS helper resources ship — they do **not** hit the live endpoint, so a gree
 
 ## Platform
 
-Voice is macOS-only. The Swift helper (`extensions/voice/macos-audio.swift`,
-plus `Info.plist` / `Entitlements.plist`) must stay in the published tarball —
-`package.json` `files` includes `extensions/`, and a test asserts the resources
-are present.
+Voice runs on **macOS and Windows** (Linux not yet supported). Two helpers are shipped and must
+stay in the published tarball — `package.json` `files` includes `extensions/` and tests assert
+they are present:
+
+- macOS: Swift helper (`extensions/voice/macos-audio.swift` + `Info.plist` / `Entitlements.plist`) compiled with `xcrun swiftc` + `codesign`, emitting `~/.pi/agent/bin/pi-meta-oauth-voice-v1`
+- Windows: C# helper (`extensions/voice/windows-audio.cs`) compiled with `csc.exe` to `~/.pi/agent/bin/pi-meta-oauth-voice-v1.exe` when a compiler is found; PowerShell fallback (`extensions/voice/windows-audio.ps1` via `Add-Type` + `winmm.dll` `waveIn*`) runs when no compiler is present. Both speak the same line-delimited JSON protocol (`ready`/`audio`/`stopped`/`error`) and 16 kHz mono s16le framing as the Swift helper. Keep the Windows pair in sync with the Swift helper when changing the protocol.
+
+`voice.ts` defaults `enabled` on for `darwin` and `win32` (see `loadSettings` / `isSupportedPlatform`) and the `/voice-on` guard checks both platforms. If adding a new platform, update those guards and ship a helper that implements the JSON protocol.

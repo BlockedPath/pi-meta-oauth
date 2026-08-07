@@ -25,6 +25,10 @@ const HELPER_SOURCE = join(HELPER_DIR, "macos-audio.swift");
 const HELPER_PLIST = join(HELPER_DIR, "Info.plist");
 const HELPER_ENTITLEMENTS = join(HELPER_DIR, "Entitlements.plist");
 const HELPER_BINARY = join(AGENT_DIR, "bin/pi-meta-oauth-voice-v1");
+// Windows helpers
+const WINDOWS_HELPER_SOURCE = join(HELPER_DIR, "windows-audio.cs");
+const WINDOWS_HELPER_PS1 = join(HELPER_DIR, "windows-audio.ps1");
+const WINDOWS_HELPER_BINARY = join(AGENT_DIR, "bin/pi-meta-oauth-voice-v1.exe");
 
 const DEFAULT_ASR_ENDPOINT =
 	"wss://shortwave.facebook.com/voyager/v1/asr/duplex";
@@ -45,6 +49,24 @@ type AsrTranscript = {
 	final?: unknown;
 };
 
+function isMacOS(): boolean {
+	return platform() === "darwin";
+}
+
+function isWindows(): boolean {
+	return platform() === "win32";
+}
+
+function isSupportedPlatform(): boolean {
+	return isMacOS() || isWindows();
+}
+
+function supportedPlatformLabel(): string {
+	if (isMacOS()) return "macOS";
+	if (isWindows()) return "Windows";
+	return `${platform()}`;
+}
+
 function loadSettings(): Settings {
 	if (existsSync(SETTINGS_FILE)) {
 		try {
@@ -56,7 +78,7 @@ function loadSettings(): Settings {
 			// Fall through to the platform default.
 		}
 	}
-	return { enabled: platform() === "darwin" };
+	return { enabled: isSupportedPlatform() };
 }
 
 function saveSettings(settings: Settings): void {
@@ -206,10 +228,17 @@ function helperNeedsBuild(): boolean {
 	);
 }
 
+function windowsHelperNeedsBuild(): boolean {
+	if (!existsSync(WINDOWS_HELPER_BINARY)) return true;
+	if (!existsSync(WINDOWS_HELPER_SOURCE)) return false;
+	const binaryTime = statSync(WINDOWS_HELPER_BINARY).mtimeMs;
+	return statSync(WINDOWS_HELPER_SOURCE).mtimeMs > binaryTime;
+}
+
 async function ensureMacOSHelper(): Promise<string> {
-	if (platform() !== "darwin") {
+	if (!isMacOS()) {
 		throw new Error(
-			"Muse-style voice input is currently available only on macOS",
+			"Muse-style voice input is currently available only on macOS and Windows",
 		);
 	}
 	if (
@@ -247,6 +276,109 @@ async function ensureMacOSHelper(): Promise<string> {
 		HELPER_BINARY,
 	]);
 	return HELPER_BINARY;
+}
+
+async function tryCompileWindowsHelper(): Promise<boolean> {
+	if (!existsSync(WINDOWS_HELPER_SOURCE)) return false;
+	mkdirSync(join(AGENT_DIR, "bin"), { recursive: true });
+
+	const candidates: string[] = [
+		"csc",
+		"csc.exe",
+		"C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe",
+		"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe",
+	];
+	// Also try where-found csc via PATH expansion if on Windows
+	for (const c of candidates) {
+		try {
+			await runProcess(c, [
+				"/nologo",
+				"/target:exe",
+				`/out:${WINDOWS_HELPER_BINARY}`,
+				WINDOWS_HELPER_SOURCE,
+			]);
+			if (existsSync(WINDOWS_HELPER_BINARY)) return true;
+		} catch {
+			// try next candidate
+		}
+	}
+	return false;
+}
+
+function findPowerShellCommand(): string {
+	// Prefer pwsh (PowerShell 7) if present, otherwise Windows PowerShell
+	// We check filesystem first to avoid spawning during hot path
+	if (existsSync("C:\\Program Files\\PowerShell\\7\\pwsh.exe"))
+		return "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+	if (existsSync("C:\\Program Files\\PowerShell\\7\\pwsh")) return "pwsh";
+	// Windows PowerShell is inbox in System32
+	if (
+		existsSync("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+	)
+		return "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+	return "powershell.exe";
+}
+
+async function ensureWindowsHelper(): Promise<{
+	command: string;
+	args: string[];
+}> {
+	if (!isWindows()) {
+		throw new Error(
+			"Muse-style voice input is currently available only on macOS and Windows",
+		);
+	}
+	if (!existsSync(WINDOWS_HELPER_SOURCE) && !existsSync(WINDOWS_HELPER_PS1)) {
+		throw new Error("The Windows microphone helper sources are incomplete");
+	}
+
+	// If compiled exe exists and is fresh, use it
+	if (existsSync(WINDOWS_HELPER_BINARY) && !windowsHelperNeedsBuild()) {
+		return { command: WINDOWS_HELPER_BINARY, args: [] };
+	}
+
+	// Try to compile exe for better performance
+	if (existsSync(WINDOWS_HELPER_SOURCE)) {
+		if (!windowsHelperNeedsBuild() && existsSync(WINDOWS_HELPER_BINARY)) {
+			return { command: WINDOWS_HELPER_BINARY, args: [] };
+		}
+		const compiled = await tryCompileWindowsHelper();
+		if (compiled && existsSync(WINDOWS_HELPER_BINARY)) {
+			return { command: WINDOWS_HELPER_BINARY, args: [] };
+		}
+	}
+
+	// Fallback to PowerShell script (no compilation needed)
+	if (existsSync(WINDOWS_HELPER_PS1)) {
+		const ps = findPowerShellCommand();
+		return {
+			command: ps,
+			args: [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				WINDOWS_HELPER_PS1,
+			],
+		};
+	}
+
+	throw new Error(
+		"Windows voice helper could not be prepared — no compiled binary and no PowerShell fallback found",
+	);
+}
+
+async function ensureHelper(): Promise<{ command: string; args: string[] }> {
+	if (isMacOS()) {
+		const bin = await ensureMacOSHelper();
+		return { command: bin, args: [] };
+	}
+	if (isWindows()) {
+		return ensureWindowsHelper();
+	}
+	throw new Error(
+		`Muse-style voice input is currently available only on macOS and Windows (current: ${supportedPlatformLabel()})`,
+	);
 }
 
 class MetaVoiceController {
@@ -339,9 +471,9 @@ class MetaVoiceController {
 	}
 
 	private enable(ctx: ExtensionContext): void {
-		if (platform() !== "darwin") {
+		if (!isSupportedPlatform()) {
 			ctx.ui.notify(
-				"Meta voice input is currently available only on macOS",
+				`Meta voice input is currently available only on macOS and Windows (current: ${supportedPlatformLabel()})`,
 				"error",
 			);
 			return;
@@ -407,8 +539,8 @@ class MetaVoiceController {
 		this.renderTranscript(ctx);
 
 		try {
-			const [binary, apiKey] = await Promise.all([
-				ensureMacOSHelper(),
+			const [helperInfo, apiKey] = await Promise.all([
+				ensureHelper(),
 				ctx.modelRegistry.getApiKeyForProvider(META_PROVIDER_ID),
 			]);
 			if (currentGeneration !== this.generation) return;
@@ -421,7 +553,12 @@ class MetaVoiceController {
 			}
 
 			this.connectSocket(ctx, apiKey, currentGeneration);
-			this.spawnHelper(ctx, binary, currentGeneration);
+			this.spawnHelper(
+				ctx,
+				helperInfo.command,
+				helperInfo.args,
+				currentGeneration,
+			);
 			this.renderInterval = setInterval(() => {
 				this.renderTranscript(ctx);
 				this.renderRecordingStatus(ctx);
@@ -558,10 +695,14 @@ class MetaVoiceController {
 
 	private spawnHelper(
 		ctx: ExtensionContext,
-		binary: string,
+		command: string,
+		args: string[],
 		currentGeneration: number,
 	): void {
-		const helper = spawn(binary, [], { stdio: ["pipe", "pipe", "pipe"] });
+		const helper = spawn(command, args, {
+			stdio: ["pipe", "pipe", "pipe"],
+			windowsHide: true,
+		});
 		this.helper = helper;
 		helper.stdout?.on("data", (chunk: Buffer) =>
 			this.parseHelperOutput(ctx, chunk, currentGeneration),
@@ -603,7 +744,7 @@ class MetaVoiceController {
 			try {
 				this.handleHelperEvent(ctx, JSON.parse(line) as HelperEvent);
 			} catch {
-				// Ignore non-protocol output from macOS audio frameworks.
+				// Ignore non-protocol output from audio frameworks.
 			}
 		}
 	}
@@ -636,7 +777,7 @@ class MetaVoiceController {
 					new Error(
 						typeof event.message === "string"
 							? event.message
-							: "macOS microphone capture failed",
+							: "microphone capture failed",
 					),
 				);
 				return;
