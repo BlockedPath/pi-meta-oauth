@@ -1,6 +1,6 @@
 {
   "name": "pi-meta-oauth",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Meta Model API OAuth provider and Muse-style voice dictation for pi",
   "keywords": [
     "pi-package",
