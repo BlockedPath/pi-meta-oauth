@@ -73,6 +73,10 @@ interface MetaCatalogModel {
 	};
 }
 
+type MuseCodeMetadata = NonNullable<
+	NonNullable<MetaCatalogModel["metadata"]>["muse-code"]
+>;
+
 // Media capabilities kept as "text"+"image" for pi-ai type compat (pi-ai 0.83/0.84 only allows those),
 // with "video"/"audio" advertised via cast so future pi-ai that expands the union picks them up.
 // See media.ts for the before_provider_request rewrite that makes @video/@audio work today
@@ -329,20 +333,38 @@ export async function refreshMetaToken(
 	};
 }
 
-function finitePositive(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0
-		? value
-		: fallback;
+function isFinitePositive(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-function numericCost(value: unknown, fallback: number): number {
+function parseNumericCost(value: unknown): number | undefined {
 	const number =
 		typeof value === "number"
 			? value
-			: typeof value === "string"
+			: typeof value === "string" && value.trim()
 				? Number(value)
 				: Number.NaN;
-	return Number.isFinite(number) && number >= 0 ? number : fallback;
+	return Number.isFinite(number) && number >= 0 ? number : undefined;
+}
+
+function finitePositive(value: unknown, fallback: number): number {
+	return isFinitePositive(value) ? value : fallback;
+}
+
+function numericCost(value: unknown, fallback: number): number {
+	return parseNumericCost(value) ?? fallback;
+}
+
+function hasCompleteStandaloneMetadata(
+	metadata: MuseCodeMetadata | undefined,
+): boolean {
+	return Boolean(
+		metadata &&
+			isFinitePositive(metadata.limit?.context) &&
+			isFinitePositive(metadata.limit?.output) &&
+			parseNumericCost(metadata.cost?.input) !== undefined &&
+			parseNumericCost(metadata.cost?.output) !== undefined,
+	);
 }
 
 function displayName(id: string): string {
@@ -379,7 +401,7 @@ export function toProviderModels(
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
 		const fallback = FALLBACK_MODELS.find((model) => model.id === entry.id);
-		if (!metadata && !fallback) return [];
+		if (!fallback && !hasCompleteStandaloneMetadata(metadata)) return [];
 		const catalogName =
 			metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
