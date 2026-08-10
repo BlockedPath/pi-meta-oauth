@@ -960,6 +960,11 @@ export default function metaMedia(pi: ExtensionAPI): void {
 	// so the before_provider_request hook can rewrite them.
 	pi.on("input", async (event, ctx) => {
 		if (!shouldEnableNativeRewrite()) return undefined;
+		// Only Meta's request hook knows how to rewrite these pseudo-images into
+		// typed video/audio/file blocks. Other providers (notably Codex) reject a
+		// video/mp4 ImageContent before the Meta tools can be called, so leave the
+		// path as text and let the active model invoke the direct Meta media tool.
+		if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
 		const text = event.text ?? "";
 		// Match @/path/to/file.mp4, @./file.wav, /abs/file.pdf, ./file.mp3 — conservative.
 		const filePattern =

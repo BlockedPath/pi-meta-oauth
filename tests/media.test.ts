@@ -1,6 +1,10 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
-import {
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import metaMedia, {
 	extractMetaResponseUsage,
 	extractResponsesText,
 	formatMetaResponseUsage,
@@ -68,6 +72,61 @@ describe("Meta media usage", () => {
 	test("ignores responses without token counts", () => {
 		expect(extractMetaResponseUsage({ usage: {} })).toBeUndefined();
 		expect(extractMetaResponseUsage({ output: [] })).toBeUndefined();
+	});
+});
+
+describe("Meta media input routing", () => {
+	test("only creates pseudo-image attachments for the Meta provider", async () => {
+		type InputHandler = (
+			event: { text: string; images: unknown[] },
+			ctx: {
+				cwd: string;
+				model?: { provider: string };
+				ui: { notify: () => void };
+			},
+		) => Promise<unknown>;
+		let inputHandler: InputHandler | undefined;
+		const pi = {
+			on(event: string, handler: unknown) {
+				if (event === "input") inputHandler = handler as InputHandler;
+			},
+			registerTool() {},
+			registerCommand() {},
+		} as unknown as ExtensionAPI;
+		metaMedia(pi);
+		expect(inputHandler).toBeDefined();
+
+		const directory = mkdtempSync(join(tmpdir(), "pi-meta-media-"));
+		const clip = join(directory, "clip.mp4");
+		writeFileSync(clip, Buffer.from("fake mp4"));
+		const event = { text: `Describe @${clip}`, images: [] };
+		const context = {
+			cwd: directory,
+			ui: { notify() {} },
+		};
+		try {
+			const codexResult = await inputHandler?.(event, {
+				...context,
+				model: { provider: "openai-codex" },
+			});
+			expect(codexResult).toBeUndefined();
+
+			const metaResult = (await inputHandler?.(event, {
+				...context,
+				model: { provider: "meta" },
+			})) as
+				| {
+						action: string;
+						images: Array<{ mimeType: string }>;
+				  }
+				| undefined;
+			expect(metaResult).toMatchObject({
+				action: "transform",
+				images: [{ mimeType: "video/mp4" }],
+			});
+		} finally {
+			rmSync(directory, { recursive: true, force: true });
+		}
 	});
 });
 
