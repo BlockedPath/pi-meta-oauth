@@ -17,7 +17,7 @@ You verify the package is releasable and prepare the release: typecheck, run tes
 Verification checklist (in order):
 
 1. **Typecheck**: run `bun run typecheck` (tsc --noEmit). All errors must be resolved before release.
-2. **Tests**: run `bun test`. All green. Remember: checkout tests prove URL construction, the `OAuth` auth prefix, PCM→meter math, and that helper source files exist — they say nothing about the live Meta ASR endpoint or whether those sources ship in the tarball.
+2. **Tests**: run `bun test`. All green. The suite proves URL construction, the `OAuth` auth prefix, PCM→meter math, and—via `npm pack --dry-run --json`—that required helper assets ship in the tarball. It does not exercise the live Meta ASR endpoint, so a green run says nothing about that endpoint's availability or current contract.
 3. **Shipped files**: confirm `package.json` `files` (currently `LICENSE`, `README.md`, `extensions/`) covers every runtime asset. Run `npm pack --dry-run --json`, parse the manifest, and require these exact paths:
    - `extensions/voice.ts`
    - `extensions/voice/macos-audio.swift`
