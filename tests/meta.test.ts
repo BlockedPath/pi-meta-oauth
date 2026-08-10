@@ -3,9 +3,18 @@ import { describe, expect, test } from "bun:test";
 import {
 	createMetaProviderConfig,
 	loginMeta,
+	META_MODEL_CATALOG_URL,
 	mintMetaApiKey,
 	toProviderModels,
 } from "../extensions/meta.ts";
+
+const LIVE_CATALOG_SNAPSHOT_2026_08_10 = [
+	"muse-spark-1.2",
+	"muse-spark-1.2-contributor",
+	"muse-spark-1.1",
+];
+const liveApiKey = process.env.PI_META_LIVE_API_KEY;
+const liveCatalogTest = liveApiKey ? test : test.skip;
 
 function jsonResponse(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), {
@@ -46,6 +55,82 @@ describe("Meta OAuth provider", () => {
 			thinkingLevelMap: { off: null, high: "deep", max: null },
 			compat: { supportsReasoningEffort: true, supportsToolSearch: true },
 		});
+	});
+
+	// Live-endpoint drift, observed 2026-08-10: GET /v1/models returned bare
+	// OpenAI-style objects -- {id, object, created, owned_by} -- without a
+	// metadata["muse-code"] block. Known IDs must therefore map entirely from
+	// FALLBACK_MODELS; unknown bare IDs are omitted until a safe fallback exists.
+	test("maps known bare catalog entries to complete bundled metadata", () => {
+		const models = toProviderModels({
+			data: LIVE_CATALOG_SNAPSHOT_2026_08_10.map((id) => ({ id })),
+		});
+
+		expect(models).toEqual(createMetaProviderConfig().models ?? []);
+	});
+
+	test("omits unknown bare IDs but maps unknown metadata-backed IDs", () => {
+		const models = toProviderModels({
+			data: [
+				{ id: "muse-bare-unknown" },
+				{
+					id: "muse-metadata-unknown",
+					metadata: {
+						"muse-code": {
+							name: "Muse Metadata Unknown",
+							modalities: { input: ["text"] },
+							limit: { context: 123_000, output: 45_000 },
+							cost: { input: "1", output: "2", cached: "0.1" },
+						},
+					},
+				},
+			],
+		});
+
+		expect(models).toHaveLength(1);
+		expect(models[0]).toMatchObject({
+			id: "muse-metadata-unknown",
+			name: "Muse Metadata Unknown",
+			contextWindow: 123_000,
+			maxTokens: 45_000,
+			cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+		});
+	});
+
+	test("bundled fallbacks cover the 2026-08-10 live catalog snapshot", () => {
+		const fallbackIDs = new Set(
+			(createMetaProviderConfig().models ?? []).map((model) => model.id),
+		);
+
+		for (const id of LIVE_CATALOG_SNAPSHOT_2026_08_10) {
+			expect(fallbackIDs.has(id)).toBe(true);
+		}
+	});
+
+	liveCatalogTest("live catalog IDs have bundled fallbacks", async () => {
+		if (!liveApiKey) throw new Error("PI_META_LIVE_API_KEY is required");
+		const response = await fetch(META_MODEL_CATALOG_URL, {
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${liveApiKey}`,
+				"x-api-version": "1.0.0",
+			},
+		});
+		if (!response.ok) {
+			throw new Error(`Meta model catalog failed (HTTP ${response.status})`);
+		}
+		const body = (await response.json()) as {
+			data?: Array<{ id?: unknown }>;
+		};
+		const liveIDs = (body.data ?? []).flatMap((entry) =>
+			typeof entry.id === "string" && entry.id ? [entry.id] : [],
+		);
+		const fallbackIDs = new Set(
+			(createMetaProviderConfig().models ?? []).map((model) => model.id),
+		);
+
+		expect(liveIDs).not.toHaveLength(0);
+		expect(liveIDs.filter((id) => !fallbackIDs.has(id))).toEqual([]);
 	});
 
 	test("enables tool search for fallback models", () => {

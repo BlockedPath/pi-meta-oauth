@@ -82,6 +82,42 @@ To scope Pi's model picker to Meta models:
 { "enabledModels": ["meta/*"] }
 ```
 
+### Making context windows visible to external tools
+
+Pi knows the Meta context window at runtime, but it does **not** persist
+catalogs for extension-registered providers to `~/.pi/agent/models-store.json`.
+Anything reading Pi's session data from outside the process therefore sees no
+window for `meta` models and can only show an absolute token count.
+
+This affects usage tooling such as
+[herdr-agent-usage](https://github.com/senna-lang/herdr-agent-usage), whose
+sidebar shows `⛁ 24k` instead of `⛁ 2% (24k)` for Muse panes.
+
+To publish the window, add an override to `~/.pi/agent/models.json`:
+
+```json
+{
+  "providers": {
+    "meta": {
+      "modelOverrides": {
+        "muse-spark-1.2": { "contextWindow": 1007997 },
+        "muse-spark-1.2-contributor": { "contextWindow": 1007997 }
+      }
+    }
+  }
+}
+```
+
+`1,007,997` is the effective limit reported for those two models by a cached
+Muse Code 0.1.0/R708.1 catalog snapshot observed on 2026-08-06. That snapshot
+did not include `muse-spark-1.1`, so no effective-limit override is claimed for
+1.1 here. The bundled fallback in `extensions/meta.ts` uses the nominal
+`1048576`; use the lower value only when you want percentages to match that
+specific Muse snapshot.
+
+This only adds metadata — the provider itself is still registered by the
+extension, and `pi --list-models meta` is unchanged.
+
 ## Verify
 
 ```bash
