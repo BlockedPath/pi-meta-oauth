@@ -1,6 +1,6 @@
 {
   "name": "pi-meta-oauth",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Meta Model API OAuth provider and Muse-style voice dictation for pi",
   "keywords": [
     "pi-package",
@@ -37,7 +37,8 @@
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.83.0 <0.85.0",
     "@earendil-works/pi-coding-agent": ">=0.83.0 <0.85.0",
-    "@earendil-works/pi-tui": ">=0.83.0 <0.85.0"
+    "@earendil-works/pi-tui": ">=0.83.0 <0.85.0",
+    "typebox": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.83.0",

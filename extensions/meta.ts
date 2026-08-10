@@ -361,7 +361,7 @@ function modalitiesToInput(
 	const input: string[] = ["text"];
 	if (modalities.includes("image")) input.push("image");
 	// Advertised via cast until pi-ai expands Model.input union beyond text|image.
-	// The before_provider_request hook in media.ts rewrites these to input_video/input_audio at request time.
+	// The before_provider_request hook in media.ts rewrites these to typed media blocks at request time.
 	if (modalities.includes("video")) input.push("video");
 	if (modalities.includes("audio")) input.push("audio");
 	// Some catalogs expose "document"/"pdf" as a modality for PDF handling.

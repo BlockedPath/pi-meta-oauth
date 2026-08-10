@@ -1,9 +1,15 @@
+import type { Usage } from "@earendil-works/pi-ai";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { META_FILES_URL, META_API_BASE_URL, META_PROVIDER_ID } from "./meta.ts";
+import {
+	createMetaProviderConfig,
+	META_FILES_URL,
+	META_API_BASE_URL,
+	META_PROVIDER_ID,
+} from "./meta.ts";
 import { existsSync, statSync, readFileSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -11,16 +17,23 @@ import { readFile } from "node:fs/promises";
 // ---------------------------------------------------------------------------
 // Meta Files API + Responses API
 // Docs: https://dev.meta.ai/docs/file-handling , /video-understanding
-// - Inline file_data / file_url / video_url / audio : 50 MB limit
+// - Inline file_data / file_url / video_url / input_audio : 50 MB limit
 // - Files API POST /v1/files purpose=user_data : 1 GiB, 100 GiB/team storage, no expiry by default
+// - Uploaded media uses input_file {file_id}; inline/public video uses
+//   input_video {video_url}; inline audio uses input_audio {data,format}.
 // - Video: video/mp4 only, reads frames + embedded audio together
-// - Audio: audio/mpeg (.mp3), audio/wav (.wav) via input_audio {data, format}
+// - Audio: audio/mpeg (.mp3), audio/wav (.wav)
 // - Image: image/png, image/jpeg, image/gif, image/webp, image/x-icon, up to 50/request
 // - PDF: application/pdf -> text first 100p + images first 50p (counts to 50-image budget)
 // ---------------------------------------------------------------------------
 
 const INLINE_LIMIT_BYTES = 50_000_000;
 const FILES_API_LIMIT_BYTES = 1_073_741_824;
+// Meta Responses `store=true` (default) has ~20 MB persistence limit even when
+// inline limit is 50 MB — a 24 MB base64 payload triggers HTTP 413
+// "payload_too_large … with `store=true`". Keep inline only for small files
+// and force Files API or `store:false` above this threshold.
+const STORE_SAFE_INLINE_BYTES = 15_000_000;
 
 type SupportedMime =
 	| "video/mp4"
@@ -81,15 +94,101 @@ function isImageMime(m: string | undefined): boolean {
 	return !!m && m.startsWith("image/");
 }
 
-function audioFormatForMime(mime: string): "wav" | "mp3" {
-	const lower = mime.toLowerCase();
-	if (lower === "audio/wav" || lower === "audio/x-wav") return "wav";
-	return "mp3"; // audio/mpeg, audio/mp3
+function filenameForMime(
+	mime: string | undefined,
+	fallback = "file.bin",
+): string {
+	switch (mime) {
+		case "video/mp4":
+			return "video.mp4";
+		case "audio/mpeg":
+		case "audio/mp3":
+			return "audio.mp3";
+		case "audio/wav":
+		case "audio/x-wav":
+			return "audio.wav";
+		case "application/pdf":
+			return "document.pdf";
+		default:
+			return fallback;
+	}
+}
+
+function audioFormatForMime(mime: string | undefined): "wav" | "mp3" {
+	return mime === "audio/wav" || mime === "audio/x-wav" ? "wav" : "mp3";
+}
+
+/** Build a generic Meta Responses input_file block. */
+function inputFileFromSource(
+	source: string,
+	filename?: string,
+): ResponsesContentBlock {
+	if (source.startsWith("https://")) {
+		return { type: "input_file", file_url: source };
+	}
+	if (source.startsWith("data:")) {
+		const mime = mimeForDataUrl(source);
+		return {
+			type: "input_file",
+			file_data: source,
+			filename: filename ?? filenameForMime(mime),
+		};
+	}
+	// Bare file_id (file-...)
+	return { type: "input_file", file_id: source };
+}
+
+function mimeForSource(source: string): string | undefined {
+	if (source.startsWith("data:")) return mimeForDataUrl(source);
+	if (source.startsWith("https://")) {
+		try {
+			return mimeForPath(new URL(source).pathname);
+		} catch {
+			return undefined;
+		}
+	}
+	return mimeForPath(source);
+}
+
+/** Build the typed content block required by Meta for each media kind. */
+export function mediaInputFromSource(
+	source: string,
+	filename?: string,
+	expectedMime?: string,
+): ResponsesContentBlock {
+	if (!source.startsWith("data:") && !source.startsWith("https://")) {
+		return { type: "input_file", file_id: source };
+	}
+	const mime = expectedMime ?? mimeForSource(source);
+	if (isVideoMime(mime)) {
+		return { type: "input_video", video_url: source };
+	}
+	if (isAudioMime(mime) && source.startsWith("data:")) {
+		return {
+			type: "input_audio",
+			input_audio: {
+				data: base64FromDataUrl(source),
+				format: audioFormatForMime(mime),
+			},
+		};
+	}
+	return inputFileFromSource(source, filename);
 }
 
 function base64FromDataUrl(dataUrl: string): string {
 	const comma = dataUrl.indexOf(",");
 	return comma === -1 ? "" : dataUrl.slice(comma + 1);
+}
+
+function base64ByteLength(base64: string): number {
+	const normalized = base64.replace(/\s/g, "");
+	if (!normalized) return 0;
+	const padding = normalized.endsWith("==")
+		? 2
+		: normalized.endsWith("=")
+			? 1
+			: 0;
+	return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
 }
 
 function safeNotify(
@@ -227,28 +326,20 @@ async function uploadMetaFile(
 	};
 }
 
-const ALLOWED_META_HOSTS = ["api.meta.ai"] as const;
 const ALLOWED_PURPOSES = ["user_data", "batch"] as const;
 
 async function listMetaFiles(
 	apiKey: string,
 	purpose = "user_data",
 ): Promise<unknown> {
-	if (purpose && !(ALLOWED_PURPOSES as readonly string[]).includes(purpose)) {
+	if (!(ALLOWED_PURPOSES as readonly string[]).includes(purpose)) {
 		throw new Error(`Invalid purpose: ${purpose}`);
 	}
-	let url: URL;
-	try {
-		url = new URL(META_FILES_URL);
-	} catch (error) {
-		throw new Error(`Invalid Meta Files URL: ${String(error)}`);
-	}
-	if (!(ALLOWED_META_HOSTS as readonly string[]).includes(url.hostname))
-		throw new Error(`Unexpected Files API host: ${url.hostname}`);
-	if (purpose) url.searchParams.set("purpose", purpose);
-	const res = await fetch(url.toString(), {
-		headers: { Authorization: `Bearer ${apiKey}` },
-	});
+	const options = { headers: { Authorization: `Bearer ${apiKey}` } };
+	const res =
+		purpose === "batch"
+			? await fetch("https://api.meta.ai/v1/files?purpose=batch", options)
+			: await fetch("https://api.meta.ai/v1/files?purpose=user_data", options);
 	const text = await res.text();
 	if (!res.ok)
 		throw new Error(
@@ -300,30 +391,150 @@ interface ResponsesContentBlock {
 	[key: string]: unknown;
 }
 
+function record(value: unknown): Record<string, unknown> | undefined {
+	return value !== null && typeof value === "object"
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function tokenCount(...values: unknown[]): number | undefined {
+	for (const value of values) {
+		const numeric =
+			typeof value === "number"
+				? value
+				: typeof value === "string" && value.trim()
+					? Number(value)
+					: Number.NaN;
+		if (Number.isFinite(numeric)) return Math.max(0, Math.trunc(numeric));
+	}
+	return undefined;
+}
+
+/** Convert a Meta Responses API usage block into Pi's nested-tool usage shape. */
+export function extractMetaResponseUsage(
+	response: unknown,
+	modelId = "muse-spark-1.2",
+): Usage | undefined {
+	const usage = record(record(response)?.usage);
+	if (!usage) return undefined;
+
+	const inputDetails = record(
+		usage.input_tokens_details ?? usage.inputTokensDetails,
+	);
+	const outputDetails = record(
+		usage.output_tokens_details ?? usage.outputTokensDetails,
+	);
+	const inputTotal = tokenCount(
+		usage.input_tokens,
+		usage.inputTokens,
+		usage.prompt_tokens,
+		usage.promptTokens,
+		usage.input,
+	);
+	const output = tokenCount(
+		usage.output_tokens,
+		usage.outputTokens,
+		usage.completion_tokens,
+		usage.completionTokens,
+		usage.output,
+	);
+	if (inputTotal === undefined && output === undefined) return undefined;
+
+	const reportedInput = inputTotal ?? 0;
+	const cacheRead = Math.min(
+		reportedInput,
+		tokenCount(inputDetails?.cached_tokens, inputDetails?.cachedTokens) ?? 0,
+	);
+	const cacheWrite = Math.min(
+		reportedInput - cacheRead,
+		tokenCount(
+			inputDetails?.cache_write_tokens,
+			inputDetails?.cacheWriteTokens,
+		) ?? 0,
+	);
+	const uncachedInput = Math.max(0, reportedInput - cacheRead - cacheWrite);
+	const outputTokens = output ?? 0;
+	const reasoning = Math.min(
+		outputTokens,
+		tokenCount(
+			outputDetails?.reasoning_tokens,
+			outputDetails?.reasoningTokens,
+		) ?? 0,
+	);
+	const totalTokens =
+		tokenCount(usage.total_tokens, usage.totalTokens) ??
+		uncachedInput + cacheRead + cacheWrite + outputTokens;
+	const model = createMetaProviderConfig().models?.find(
+		(candidate) => candidate.id === modelId,
+	);
+	const rates = model?.cost;
+	const cost = {
+		input: (uncachedInput * (rates?.input ?? 0)) / 1_000_000,
+		output: (outputTokens * (rates?.output ?? 0)) / 1_000_000,
+		cacheRead: (cacheRead * (rates?.cacheRead ?? 0)) / 1_000_000,
+		cacheWrite: (cacheWrite * (rates?.cacheWrite ?? 0)) / 1_000_000,
+		total: 0,
+	};
+	cost.total = cost.input + cost.output + cost.cacheRead + cost.cacheWrite;
+
+	return {
+		input: uncachedInput,
+		output: outputTokens,
+		cacheRead,
+		cacheWrite,
+		reasoning,
+		totalTokens,
+		cost,
+	};
+}
+
+export function formatMetaResponseUsage(usage: Usage): string {
+	const parts = [`${usage.input.toLocaleString()} input`];
+	if (usage.cacheRead)
+		parts.push(`${usage.cacheRead.toLocaleString()} cache read`);
+	if (usage.cacheWrite)
+		parts.push(`${usage.cacheWrite.toLocaleString()} cache write`);
+	parts.push(`${usage.output.toLocaleString()} output`);
+	if (usage.reasoning)
+		parts.push(`${usage.reasoning.toLocaleString()} reasoning`);
+	return `Video token usage: ${usage.totalTokens.toLocaleString()} total (${parts.join(", ")})`;
+}
+
 // Helper to extract output_text from Responses API response (covers streamed and non-streamed shapes)
-function extractResponsesText(json: unknown): string {
+export function extractResponsesText(json: unknown): string {
 	if (!json || typeof json !== "object") return "";
 	const j = json as Record<string, unknown>;
-	// SDK shape: output_text
-	if (typeof j.output_text === "string") return j.output_text;
-	// output array
+	// Some Meta responses include an empty output_text alongside populated output blocks.
+	if (typeof j.output_text === "string" && j.output_text.trim())
+		return j.output_text;
 	const output = j.output as unknown;
 	if (Array.isArray(output)) {
 		const texts: string[] = [];
 		for (const item of output as Record<string, unknown>[]) {
-			if (!item || typeof item !== "object") continue;
-			if (item.type === "message" && Array.isArray(item.content)) {
+			if (!item || typeof item !== "object" || item.type !== "message")
+				continue;
+			if (typeof item.content === "string" && item.content.trim())
+				texts.push(item.content);
+			if (Array.isArray(item.content)) {
 				for (const c of item.content as Record<string, unknown>[]) {
-					if (c.type === "output_text" && typeof c.text === "string")
+					if (
+						(c.type === "output_text" || c.type === "text") &&
+						typeof c.text === "string" &&
+						c.text.trim()
+					)
 						texts.push(c.text);
-					if (c.type === "refusal" && typeof c.refusal === "string")
+					if (
+						c.type === "refusal" &&
+						typeof c.refusal === "string" &&
+						c.refusal.trim()
+					)
 						texts.push(c.refusal);
 				}
 			}
 		}
 		if (texts.length) return texts.join("\n\n");
 	}
-	if (typeof j.text === "string") return j.text;
+	if (typeof j.text === "string" && j.text.trim()) return j.text;
 	return JSON.stringify(json, null, 2).slice(0, 8000);
 }
 
@@ -332,17 +543,23 @@ async function callMetaResponses(
 	payload: Record<string, unknown>,
 	signal?: AbortSignal,
 ): Promise<{ text: string; raw: unknown }> {
-	const res = await fetch(responsesUrl(), {
-		method: "POST",
-		headers: {
-			Authorization: `Bearer ${apiKey}`,
-			"Content-Type": "application/json",
-			"x-api-version": "1.0.0",
-		},
-		body: JSON.stringify(payload),
-		signal,
-	});
-	const text = await res.text();
+	// Force store:false for media payloads to avoid the ~20 MB
+	// persistence limit (413 payload_too_large with store=true). Files API
+	// is the correct path for large media per /docs/file-handling.
+	payload.store = false;
+	const doFetch = async (body: Record<string, unknown>) =>
+		await fetch(responsesUrl(), {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+				"x-api-version": "1.0.0",
+			},
+			body: JSON.stringify(body),
+			signal,
+		});
+	let res = await doFetch(payload);
+	let text = await res.text();
 	let json: unknown;
 	try {
 		json = text ? (JSON.parse(text) as unknown) : {};
@@ -360,6 +577,22 @@ async function callMetaResponses(
 						"message" in (json as Record<string, unknown>)
 					? String((json as Record<string, unknown>).message).slice(0, 1000)
 					: text.slice(0, 1000)) || res.statusText;
+		// Auto-retry once with store:false if the error is the ~20 MB
+		// persistence limit (413 with store=true) and we haven't already set it.
+		const isStoreLimit =
+			res.status === 413 &&
+			String(detail).includes("store=true") &&
+			payload.store !== false;
+		if (isStoreLimit) {
+			res = await doFetch({ ...payload, store: false });
+			text = await res.text();
+			try {
+				json = text ? (JSON.parse(text) as unknown) : {};
+			} catch {
+				json = text;
+			}
+			if (res.ok) return { text: extractResponsesText(json), raw: json };
+		}
 		throw new Error(`Meta Responses failed (HTTP ${res.status}): ${detail}`);
 	}
 	return { text: extractResponsesText(json), raw: json };
@@ -386,10 +619,9 @@ function dataUrlForFile(path: string): {
 // pi-ai's UserMessage is still string | (TextContent | ImageContent)[].
 // We smuggle video/audio/pdf as ImageContent (data:video/..., data:audio/..., data:application/pdf...)
 // via the input handler or via read tool results; this hook rewrites the
-// resulting {type:"input_image", image_url:"data:video/..."} into the correct
-// {type:"input_video", video_url:...} / {type:"input_audio", input_audio:{data,format}} /
-// {type:"input_file", file_data:...} blocks before the request is sent.
-// Also handles https://... video URLs and large inline payloads by uploading via Files API.
+// resulting {type:"input_image", image_url:"data:video/..."} into the typed
+// input_video/input_audio/input_file block required by Meta before the request is sent.
+// Also handles https://... media URLs and large inline payloads via Files API.
 // Enable/disable via PI_META_NATIVE_ATTACHMENTS env (default: on).
 // ---------------------------------------------------------------------------
 
@@ -430,38 +662,36 @@ function rewriteBlock(
 	if (isHttpsImage || isImageMime(mime)) return null; // keep as image
 
 	if (isVideoMime(mime) || isHttpsVideo) {
-		// input_video with video_url supports both https and data: URLs per docs
-		return { type: "input_video", video_url: url };
+		return mediaInputFromSource(url, "video.mp4", "video/mp4") as Record<
+			string,
+			unknown
+		>;
 	}
 	if (isAudioMime(mime) || isHttpsAudio) {
-		const data = url.startsWith("data:") ? base64FromDataUrl(url) : url;
 		const effectiveMime =
 			typeof mime === "string"
 				? mime
 				: lowerUrl.endsWith(".wav")
 					? "audio/wav"
 					: "audio/mpeg";
-		const format = audioFormatForMime(effectiveMime);
-		// Responses API input_audio shape: {type:"input_audio", input_audio:{data, format}}
-		if (url.startsWith("data:")) {
-			return { type: "input_audio", input_audio: { data, format } };
-		}
-		// For https audio URL, use input_audio with audio_url-like fallback? Docs: input_audio can be file_id or audio_url data URI or inline.
-		// For public https audio, the cleanest is input_audio with audio_url is not documented for responses; use file_url via input_file if needed.
-		// Fallback: treat as input_file file_url
-		return { type: "input_file", file_url: url };
+		return mediaInputFromSource(
+			url,
+			filenameForMime(effectiveMime, "audio.bin"),
+			effectiveMime,
+		) as Record<string, unknown>;
 	}
 	if (isPdfMime(mime) || isHttpsPdf) {
-		if (url.startsWith("https://")) {
-			return { type: "input_file", file_url: url };
-		}
-		// data:application/pdf;base64,... -> file_data
-		return { type: "input_file", file_data: url, filename: "document.pdf" };
+		return mediaInputFromSource(
+			url,
+			"document.pdf",
+			"application/pdf",
+		) as Record<string, unknown>;
 	}
 	return null;
 }
 
-function rewriteResponsesPayload(payload: unknown): {
+/** Rewrite smuggled media image_url blocks into Meta-supported typed blocks. */
+export function rewriteResponsesPayload(payload: unknown): {
 	rewritten: boolean;
 	payload: unknown;
 } {
@@ -530,12 +760,45 @@ function rewriteResponsesPayload(payload: unknown): {
 	return { rewritten: true, payload: { ...p, input: newInput } };
 }
 
-// For large inline data URLs (>50MB) we should upload via Files API instead of sending inline.
-// This is async and needs apiKey. We do it lazily in before_provider_request if we can get a key.
-// To avoid blocking forever we only upload when we can resolve a key from env or fallback.
-async function maybeUploadLargeInlineBlocks(
+async function uploadInlineMedia(
+	apiKey: string,
+	base64: string,
+	mime: string,
+	filename: string,
+): Promise<string> {
+	const blob = new Blob([Buffer.from(base64, "base64")], { type: mime });
+	const form = new FormData();
+	form.append("file", blob, filename);
+	form.append("purpose", "user_data");
+	const res = await fetch(META_FILES_URL, {
+		method: "POST",
+		headers: { Authorization: `Bearer ${apiKey}` },
+		body: form,
+	});
+	const text = await res.text();
+	if (!res.ok) {
+		throw new Error(
+			`Files upload for large inline media failed: ${text.slice(0, 500)}`,
+		);
+	}
+	let json: Record<string, unknown>;
+	try {
+		json = JSON.parse(text) as Record<string, unknown>;
+	} catch (error) {
+		throw new Error(`Files upload returned invalid JSON: ${String(error)}`);
+	}
+	if (typeof json.id !== "string" || !json.id) {
+		throw new Error(`Files upload returned no id: ${text.slice(0, 500)}`);
+	}
+	return json.id;
+}
+
+// Promote inline media above the store-safe threshold to the Files API. Typed
+// input_video/input_audio blocks stay inline below the threshold.
+export async function maybeUploadLargeInlineBlocks(
 	payload: unknown,
 	apiKey: string | undefined,
+	uploadThresholdBytes = STORE_SAFE_INLINE_BYTES,
 ): Promise<{ payload: unknown; uploaded: number }> {
 	if (!apiKey) return { payload, uploaded: 0 };
 	if (!payload || typeof payload !== "object") return { payload, uploaded: 0 };
@@ -543,159 +806,84 @@ async function maybeUploadLargeInlineBlocks(
 	const input = p.input;
 	if (!Array.isArray(input)) return { payload, uploaded: 0 };
 	let uploaded = 0;
-	// Need to handle both rewritten and original blocks — check all input_* that carry inline data
+	let needsStoreFalse = false;
 	const newInput: unknown[] = [];
+
 	for (const entry of input as Record<string, unknown>[]) {
-		if (
-			!entry ||
-			typeof entry !== "object" ||
-			!Array.isArray((entry as Record<string, unknown>).content)
-		) {
+		if (!entry || typeof entry !== "object" || !Array.isArray(entry.content)) {
 			newInput.push(entry);
 			continue;
 		}
-		const e = entry as Record<string, unknown>;
-		const content = e.content as Record<string, unknown>[];
+		const content = entry.content as Record<string, unknown>[];
 		const newContent: Record<string, unknown>[] = [];
 		for (const block of content) {
+			let inline:
+				| { base64: string; mime: string; filename: string }
+				| undefined;
 			if (
 				block.type === "input_video" &&
 				typeof block.video_url === "string" &&
 				block.video_url.startsWith("data:")
 			) {
-				const b64 = base64FromDataUrl(block.video_url as string);
-				const bytes = Math.floor((b64.length * 3) / 4);
-				if (bytes > INLINE_LIMIT_BYTES) {
-					// upload: create temp file? Instead, upload directly via fetch with blob
-					const mime = mimeForDataUrl(block.video_url as string) ?? "video/mp4";
-					const blob = new Blob([Buffer.from(b64, "base64")], { type: mime });
-					const form = new FormData();
-					form.append(
-						"file",
-						blob,
-						`video${mime === "video/mp4" ? ".mp4" : ""}`,
+				inline = {
+					base64: base64FromDataUrl(block.video_url),
+					mime: mimeForDataUrl(block.video_url) ?? "video/mp4",
+					filename: "video.mp4",
+				};
+			} else if (block.type === "input_audio") {
+				const audio = record(block.input_audio);
+				if (typeof audio?.data === "string") {
+					const format = audio.format === "wav" ? "wav" : "mp3";
+					inline = {
+						base64: audio.data.startsWith("data:")
+							? base64FromDataUrl(audio.data)
+							: audio.data,
+						mime: format === "wav" ? "audio/wav" : "audio/mpeg",
+						filename: `audio.${format}`,
+					};
+				}
+			} else if (
+				block.type === "input_file" &&
+				typeof block.file_data === "string" &&
+				block.file_data.startsWith("data:")
+			) {
+				const mime =
+					mimeForDataUrl(block.file_data) ?? "application/octet-stream";
+				inline = {
+					base64: base64FromDataUrl(block.file_data),
+					mime,
+					filename:
+						typeof block.filename === "string" && block.filename
+							? block.filename
+							: filenameForMime(mime),
+				};
+			}
+
+			if (inline) {
+				needsStoreFalse = true;
+				if (base64ByteLength(inline.base64) > uploadThresholdBytes) {
+					const id = await uploadInlineMedia(
+						apiKey,
+						inline.base64,
+						inline.mime,
+						inline.filename,
 					);
-					form.append("purpose", "user_data");
-					const res = await fetch(META_FILES_URL, {
-						method: "POST",
-						headers: { Authorization: `Bearer ${apiKey}` },
-						body: form,
-					});
-					const text = await res.text();
-					if (!res.ok)
-						throw new Error(
-							`Files upload for large video failed: ${text.slice(0, 500)}`,
-						);
-					let j: Record<string, unknown>;
-					try {
-						j = JSON.parse(text) as Record<string, unknown>;
-					} catch (error) {
-						throw new Error(
-							`Files upload returned invalid JSON: ${String(error)}`,
-						);
-					}
-					const id = typeof j.id === "string" ? j.id : "";
-					if (!id)
-						throw new Error(`Upload returned no id: ${text.slice(0, 500)}`);
 					uploaded++;
 					newContent.push({ type: "input_file", file_id: id });
 					continue;
 				}
 			}
-			if (
-				block.type === "input_file" &&
-				typeof block.file_data === "string" &&
-				block.file_data.startsWith("data:")
-			) {
-				const b64 = base64FromDataUrl(block.file_data as string);
-				const bytes = Math.floor((b64.length * 3) / 4);
-				if (bytes > INLINE_LIMIT_BYTES) {
-					const mime =
-						mimeForDataUrl(block.file_data as string) ??
-						"application/octet-stream";
-					const blob = new Blob([Buffer.from(b64, "base64")], { type: mime });
-					const form = new FormData();
-					form.append(
-						"file",
-						blob,
-						`file${extname("file." + (mime.split("/")[1] || ""))}`,
-					);
-					form.append("purpose", "user_data");
-					const res = await fetch(META_FILES_URL, {
-						method: "POST",
-						headers: { Authorization: `Bearer ${apiKey}` },
-						body: form,
-					});
-					const text = await res.text();
-					if (!res.ok)
-						throw new Error(
-							`Files upload for large file failed: ${text.slice(0, 500)}`,
-						);
-					let j: Record<string, unknown>;
-					try {
-						j = JSON.parse(text) as Record<string, unknown>;
-					} catch (error) {
-						throw new Error(
-							`Files upload returned invalid JSON: ${String(error)}`,
-						);
-					}
-					const id = typeof j.id === "string" ? j.id : "";
-					if (id) {
-						uploaded++;
-						newContent.push({ type: "input_file", file_id: id });
-						continue;
-					}
-				}
-			}
-			if (
-				block.type === "input_audio" &&
-				block.input_audio &&
-				typeof (block.input_audio as Record<string, unknown>).data === "string"
-			) {
-				const data = (block.input_audio as Record<string, unknown>)
-					.data as string;
-				const bytes = Math.floor((data.length * 3) / 4);
-				if (bytes > INLINE_LIMIT_BYTES) {
-					const format = (block.input_audio as Record<string, unknown>)
-						.format as string;
-					const mime = format === "wav" ? "audio/wav" : "audio/mpeg";
-					const blob = new Blob([Buffer.from(data, "base64")], { type: mime });
-					const form = new FormData();
-					form.append("file", blob, `audio.${format}`);
-					form.append("purpose", "user_data");
-					const res = await fetch(META_FILES_URL, {
-						method: "POST",
-						headers: { Authorization: `Bearer ${apiKey}` },
-						body: form,
-					});
-					const text = await res.text();
-					if (!res.ok)
-						throw new Error(
-							`Files upload for large audio failed: ${text.slice(0, 500)}`,
-						);
-					let j: Record<string, unknown>;
-					try {
-						j = JSON.parse(text) as Record<string, unknown>;
-					} catch (error) {
-						throw new Error(
-							`Files upload returned invalid JSON: ${String(error)}`,
-						);
-					}
-
-					const id = typeof j.id === "string" ? j.id : "";
-					if (id) {
-						uploaded++;
-						newContent.push({ type: "input_file", file_id: id });
-						continue;
-					}
-				}
-			}
 			newContent.push(block);
 		}
-		newInput.push({ ...e, content: newContent });
+		newInput.push({ ...entry, content: newContent });
 	}
-	if (uploaded === 0) return { payload, uploaded: 0 };
-	return { payload: { ...p, input: newInput }, uploaded };
+
+	if (uploaded === 0) {
+		return needsStoreFalse
+			? { payload: { ...p, store: false }, uploaded: 0 }
+			: { payload, uploaded: 0 };
+	}
+	return { payload: { ...p, input: newInput, store: false }, uploaded };
 }
 
 // ---------------------------------------------------------------------------
@@ -705,28 +893,64 @@ async function maybeUploadLargeInlineBlocks(
 export default function metaMedia(pi: ExtensionAPI): void {
 	// --- Before provider request rewrite (Option B transparent path) ---
 	if (shouldEnableNativeRewrite()) {
-		pi.on("before_provider_request", async (event) => {
-			const original = event.payload;
+		pi.on("before_provider_request", async (event, ctx) => {
+			if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
+			const original = event.payload as Record<string, unknown>;
 			const { rewritten, payload: rewrittenPayload } =
 				rewriteResponsesPayload(original);
-			if (!rewritten) return undefined;
-			// Try to also handle large inline → Files API upload if we can get a key.
-			// We attempt to read key from env-adjacent modelRegistry is not available in this event's ctx,
-			// so we best-effort fetch from process env or skip.
-			// The tool path always uses explicit ctx.modelRegistry, so this is only for @file drag-drop.
-			const apiKey =
+			// Even without rewrite, large inline media in the original payload
+			// (e.g. drag-dropped video) can hit the 413 store=true limit —
+			// ensure store:false and try Files API upload.
+			const payloadToCheck = rewritten ? rewrittenPayload : original;
+			const hasMedia = (() => {
+				if (!payloadToCheck || typeof payloadToCheck !== "object") return false;
+				const input = (payloadToCheck as Record<string, unknown>).input;
+				if (!Array.isArray(input)) return false;
+				for (const e of input as Record<string, unknown>[]) {
+					if (!e || typeof e !== "object" || !Array.isArray(e.content))
+						continue;
+					for (const b of e.content as Record<string, unknown>[]) {
+						if (
+							b.type === "input_file" ||
+							b.type === "input_image" ||
+							b.type === "input_video" ||
+							b.type === "input_audio"
+						)
+							return true;
+					}
+				}
+				return false;
+			})();
+			if (!rewritten && !hasMedia) return undefined;
+			// Resolve the same stored Meta credential used by the active provider. This is
+			// essential for @file drag-drop, where the key usually is not in process.env.
+			let apiKey =
 				process.env.MODEL_API_KEY ?? process.env.META_API_KEY ?? undefined;
+			if (!apiKey) {
+				try {
+					apiKey =
+						(await ctx.modelRegistry.getApiKeyForProvider(META_PROVIDER_ID)) ??
+						undefined;
+				} catch {
+					// Fall back to typed inline media with store:false below.
+				}
+			}
 			if (apiKey) {
 				try {
 					const { payload: uploadedPayload } =
-						await maybeUploadLargeInlineBlocks(rewrittenPayload, apiKey);
+						await maybeUploadLargeInlineBlocks(payloadToCheck, apiKey);
 					return uploadedPayload as unknown;
 				} catch {
-					// fall back to rewritten without upload
-					return rewrittenPayload as unknown;
+					// fall back without upload — at least force store:false
+					const fallback = payloadToCheck as Record<string, unknown>;
+					return { ...fallback, store: false } as unknown;
 				}
 			}
-			return rewrittenPayload as unknown;
+			// No apiKey available for upload — force store:false to avoid 413
+			return {
+				...(payloadToCheck as Record<string, unknown>),
+				store: false,
+			} as unknown;
 		});
 	}
 
@@ -769,16 +993,21 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				);
 				continue;
 			}
-			// For large files (>50MB) we could upload here, but we lack apiKey in input context sometimes.
-			// Instead smuggle as data URL and let before_provider_request upload if needed.
-			// To avoid OOM on huge files, skip inline if >50MB and notify to use /meta-video which does Files API.
-			if (stat.size > INLINE_LIMIT_BYTES) {
-				safeNotify(
-					ctx,
-					`Large file ${basename(absolute)} (${(stat.size / 1_000_000).toFixed(1)} MB) — use /meta-video or /meta-audio for Files API upload (50MB inline limit)`,
-					"info",
-				);
-				continue;
+			// Files API is required for reliability — inline base64 hits the
+			// ~20 MB `store=true` persistence limit (24 MB → 413). We keep inline
+			// only for small files (<15 MB); larger files will be uploaded via
+			// Files API in before_provider_request or via /meta-video.
+			if (stat.size > STORE_SAFE_INLINE_BYTES) {
+				if (stat.size > INLINE_LIMIT_BYTES) {
+					safeNotify(
+						ctx,
+						`Large file ${basename(absolute)} (${(stat.size / 1_000_000).toFixed(1)} MB) — use /meta-video or /meta-audio for Files API upload (50MB inline / 15MB store-safe limit)`,
+						"info",
+					);
+					continue;
+				}
+				// 15-50 MB: still smuggle inline but before_provider_request
+				// will promote to Files API (if apiKey available) and set store:false
 			}
 			try {
 				const { dataUrl } = dataUrlForFile(absolute);
@@ -879,7 +1108,7 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				if (file_id) {
 					videoBlock = { type: "input_file", file_id };
 				} else if (url) {
-					videoBlock = { type: "input_video", video_url: url };
+					videoBlock = mediaInputFromSource(url, "video.mp4", "video/mp4");
 				} else if (path) {
 					const absolute = resolve(
 						(ctx as unknown as { cwd?: string }).cwd ?? process.cwd(),
@@ -890,20 +1119,30 @@ export default function metaMedia(pi: ExtensionAPI): void {
 					const stat = statSync(absolute);
 					if (stat.size > FILES_API_LIMIT_BYTES)
 						throw new Error(`File too large (1 GiB limit): ${path}`);
-					if (stat.size > INLINE_LIMIT_BYTES) {
+					// Docs recommend Files API (upload → file_id) for video. Inline
+					// base64 also hits the ~20 MB `store=true` persistence limit
+					// (24 MB → HTTP 413) even when under the 50 MB inline cap.
+					// Use Files API for any video above the store-safe threshold
+					// and for all larger media; keep inline only for tiny files.
+					const useFilesApi = stat.size > STORE_SAFE_INLINE_BYTES;
+					if (useFilesApi) {
 						const up = await uploadMetaFile(apiKey, absolute);
 						videoBlock = { type: "input_file", file_id: up.id };
 					} else {
 						const { dataUrl } = dataUrlForFile(absolute);
-						// Prefer input_file with file_data for small inline? Docs show input_file file_data and input_video video_url both work.
-						// Use input_video with data URL for clarity.
-						videoBlock = { type: "input_video", video_url: dataUrl };
+						videoBlock = mediaInputFromSource(
+							dataUrl,
+							basename(absolute),
+							"video/mp4",
+						);
 					}
 				} else {
 					throw new Error("No source");
 				}
+				const selectedModel = model ?? "muse-spark-1.2";
 				const payload: Record<string, unknown> = {
-					model: model ?? "muse-spark-1.2",
+					model: selectedModel,
+					store: false,
 					input: [
 						{
 							type: "message",
@@ -914,12 +1153,14 @@ export default function metaMedia(pi: ExtensionAPI): void {
 							],
 						},
 					],
-					max_output_tokens: Math.max(max_output_tokens ?? 4000, 4000),
+					max_output_tokens: Math.max(max_output_tokens ?? 8000, 4000),
 				};
 				const { text, raw } = await callMetaResponses(apiKey, payload, signal);
+				const usage = extractMetaResponseUsage(raw, selectedModel);
 				return {
 					content: [{ type: "text", text }],
-					details: { raw, videoBlock },
+					details: { raw, videoBlock, usage },
+					usage,
 				};
 			} catch (e) {
 				return {
@@ -980,9 +1221,7 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				if (file_id) {
 					audioBlock = { type: "input_file", file_id };
 				} else if (url) {
-					// For URLs, use input_audio with audio_url? Docs show Responses accepts input_audio with file_id or inline; for URL use input_file file_url as fallback.
-					// Prefer input_file file_url for public audio URL.
-					audioBlock = { type: "input_file", file_url: url };
+					audioBlock = mediaInputFromSource(url, "audio.bin");
 				} else if (path) {
 					const absolute = resolve(
 						(ctx as unknown as { cwd?: string }).cwd ?? process.cwd(),
@@ -999,23 +1238,23 @@ export default function metaMedia(pi: ExtensionAPI): void {
 							`Unsupported audio mime ${mime}, need audio/wav or audio/mpeg`,
 						);
 					}
-					if (stat.size > INLINE_LIMIT_BYTES) {
+					if (stat.size > STORE_SAFE_INLINE_BYTES) {
 						const up = await uploadMetaFile(apiKey, absolute);
 						audioBlock = { type: "input_file", file_id: up.id };
 					} else {
-						const data = readFileSync(absolute).toString("base64");
-						const effectiveMime = typeof mime === "string" ? mime : "audio/wav";
-						const fmt = audioFormatForMime(effectiveMime);
-						audioBlock = {
-							type: "input_audio",
-							input_audio: { data, format: fmt },
-						};
+						const { dataUrl } = dataUrlForFile(absolute);
+						audioBlock = mediaInputFromSource(
+							dataUrl,
+							basename(absolute),
+							mime,
+						);
 					}
 				} else {
 					throw new Error("No audio source");
 				}
 				const payload: Record<string, unknown> = {
 					model: model ?? "muse-spark-1.2",
+					store: false,
 					input: [
 						{
 							type: "message",
@@ -1098,7 +1337,7 @@ export default function metaMedia(pi: ExtensionAPI): void {
 					content: [
 						{
 							type: "text",
-							text: `Uploaded ${basename(absolute)} → ${result.id} (${result.bytes} bytes, status: ${result.status}${result.expires_at ? `, expires_at: ${result.expires_at}` : ""}). Use with {type:"input_file", file_id:"${result.id}"} or {type:"input_video", file_id} etc.`,
+							text: `Uploaded ${basename(absolute)} → ${result.id} (${result.bytes} bytes, status: ${result.status}${result.expires_at ? `, expires_at: ${result.expires_at}` : ""}). Use with {type:"input_file", file_id:"${result.id}"}.`,
 						},
 					],
 					details: result,
@@ -1151,7 +1390,7 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				);
 				let fileBlock: ResponsesContentBlock;
 				if (file_id) fileBlock = { type: "input_file", file_id };
-				else if (url) fileBlock = { type: "input_file", file_url: url };
+				else if (url) fileBlock = mediaInputFromSource(url);
 				else if (path) {
 					const absolute = resolve(
 						(ctx as unknown as { cwd?: string }).cwd ?? process.cwd(),
@@ -1162,18 +1401,17 @@ export default function metaMedia(pi: ExtensionAPI): void {
 					const stat = statSync(absolute);
 					if (stat.size > FILES_API_LIMIT_BYTES)
 						throw new Error(`File too large (1 GiB limit)`);
-					if (stat.size > INLINE_LIMIT_BYTES) {
+					if (stat.size > STORE_SAFE_INLINE_BYTES) {
 						const up = await uploadMetaFile(apiKey, absolute);
 						fileBlock = { type: "input_file", file_id: up.id };
 					} else {
 						const { dataUrl, mime } = dataUrlForFile(absolute);
-						const filename = basename(absolute);
-						// Responses API inline: {type:"input_file", file_data, filename}
-						fileBlock = { type: "input_file", file_data: dataUrl, filename };
+						fileBlock = mediaInputFromSource(dataUrl, basename(absolute), mime);
 					}
 				} else throw new Error("No source");
 				const payload: Record<string, unknown> = {
 					model: model ?? "muse-spark-1.2",
+					store: false,
 					input: [
 						{
 							type: "message",
@@ -1227,9 +1465,9 @@ export default function metaMedia(pi: ExtensionAPI): void {
 			const source = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace);
 			const prompt =
 				firstSpace === -1
-					? "Describe what happens in this video. Transcribe any speech."
+					? "Summarize what happens in this video in detail. Transcribe any speech verbatim. List key visual moments in 5 bullet points."
 					: trimmed.slice(firstSpace + 1).trim() ||
-						"Describe what happens in this video.";
+						"Summarize what happens in this video in detail. Transcribe any speech verbatim.";
 			const isFileId = source.startsWith("file-");
 			const isUrl = source.startsWith("https://") || source.startsWith("data:");
 			const toolArgs: Record<string, unknown> = { prompt };
@@ -1245,21 +1483,24 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				);
 				let block: ResponsesContentBlock;
 				if (isFileId) block = { type: "input_file", file_id: source };
-				else if (isUrl) block = { type: "input_video", video_url: source };
+				else if (isUrl)
+					block = mediaInputFromSource(source, "video.mp4", "video/mp4");
 				else {
 					const abs = resolve(cwd, source);
 					if (!existsSync(abs)) throw new Error(`File not found: ${abs}`);
 					const stat = statSync(abs);
-					if (stat.size > INLINE_LIMIT_BYTES) {
+					if (stat.size > STORE_SAFE_INLINE_BYTES) {
 						const up = await uploadMetaFile(apiKey, abs);
 						block = { type: "input_file", file_id: up.id };
 					} else {
 						const { dataUrl } = dataUrlForFile(abs);
-						block = { type: "input_video", video_url: dataUrl };
+						block = mediaInputFromSource(dataUrl, basename(abs), "video/mp4");
 					}
 				}
-				const { text } = await callMetaResponses(apiKey, {
-					model: "muse-spark-1.2",
+				const model = "muse-spark-1.2";
+				const { text, raw } = await callMetaResponses(apiKey, {
+					model,
+					store: false,
 					input: [
 						{
 							type: "message",
@@ -1270,9 +1511,14 @@ export default function metaMedia(pi: ExtensionAPI): void {
 							],
 						},
 					],
-					max_output_tokens: 4000,
+					max_output_tokens: 8000,
 				});
-				safeNotify(ctx, text.slice(0, 4000), "info");
+				const usage = extractMetaResponseUsage(raw, model);
+				const usageText = usage ? `\n\n${formatMetaResponseUsage(usage)}` : "";
+				const displayText = text.trim()
+					? text.slice(0, 4000)
+					: `No summary returned (raw preview: ${JSON.stringify(raw).slice(0, 1500)})`;
+				safeNotify(ctx, `${displayText}${usageText}`, "info");
 			} catch (e) {
 				safeNotify(
 					ctx,
@@ -1312,25 +1558,22 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				);
 				let block: ResponsesContentBlock;
 				if (isFileId) block = { type: "input_file", file_id: source };
-				else if (isUrl) block = { type: "input_file", file_url: source };
+				else if (isUrl) block = mediaInputFromSource(source, "audio.bin");
 				else {
 					const abs = resolve(cwd, source);
 					if (!existsSync(abs)) throw new Error(`File not found: ${abs}`);
 					const stat = statSync(abs);
-					if (stat.size > INLINE_LIMIT_BYTES) {
+					if (stat.size > STORE_SAFE_INLINE_BYTES) {
 						const up = await uploadMetaFile(apiKey, abs);
 						block = { type: "input_file", file_id: up.id };
 					} else {
-						const data = readFileSync(abs).toString("base64");
-						const mime = mimeForPath(abs) ?? "audio/wav";
-						block = {
-							type: "input_audio",
-							input_audio: { data, format: audioFormatForMime(mime) },
-						};
+						const { dataUrl, mime } = dataUrlForFile(abs);
+						block = mediaInputFromSource(dataUrl, basename(abs), mime);
 					}
 				}
 				const { text } = await callMetaResponses(apiKey, {
 					model: "muse-spark-1.2",
+					store: false,
 					input: [
 						{
 							type: "message",
@@ -1383,25 +1626,22 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				);
 				let block: ResponsesContentBlock;
 				if (isFileId) block = { type: "input_file", file_id: source };
-				else if (isUrl) block = { type: "input_file", file_url: source };
+				else if (isUrl) block = mediaInputFromSource(source);
 				else {
 					const abs = resolve(cwd, source);
 					if (!existsSync(abs)) throw new Error(`File not found: ${abs}`);
 					const stat = statSync(abs);
-					if (stat.size > INLINE_LIMIT_BYTES) {
+					if (stat.size > STORE_SAFE_INLINE_BYTES) {
 						const up = await uploadMetaFile(apiKey, abs);
 						block = { type: "input_file", file_id: up.id };
 					} else {
-						const { dataUrl } = dataUrlForFile(abs);
-						block = {
-							type: "input_file",
-							file_data: dataUrl,
-							filename: basename(abs),
-						};
+						const { dataUrl, mime } = dataUrlForFile(abs);
+						block = mediaInputFromSource(dataUrl, basename(abs), mime);
 					}
 				}
 				const { text } = await callMetaResponses(apiKey, {
 					model: "muse-spark-1.2",
+					store: false,
 					input: [
 						{
 							type: "message",
