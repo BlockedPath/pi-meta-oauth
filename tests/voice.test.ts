@@ -1,5 +1,6 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +40,7 @@ describe("Meta voice mode", () => {
 		expect(url.searchParams.get("sessionId")).toBe("session-123");
 	});
 
-	test("ships the macOS helper resources", () => {
+	test("includes the macOS helper sources in the checkout", () => {
 		const root = join(
 			dirname(fileURLToPath(import.meta.url)),
 			"../extensions/voice",
@@ -53,13 +54,50 @@ describe("Meta voice mode", () => {
 		}
 	});
 
-	test("ships the Windows helper resources", () => {
+	test("includes the Windows helper sources in the checkout", () => {
 		const root = join(
 			dirname(fileURLToPath(import.meta.url)),
 			"../extensions/voice",
 		);
 		for (const file of ["windows-audio.cs", "windows-audio.ps1"]) {
 			expect(existsSync(join(root, file))).toBe(true);
+		}
+	});
+
+	test("packs every required voice runtime asset", () => {
+		const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+		const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+		const output = execFileSync(
+			npmExecutable,
+			["pack", "--dry-run", "--json"],
+			{ cwd: projectRoot, encoding: "utf8" },
+		);
+		const parsed = JSON.parse(output) as unknown;
+		const packResult = Array.isArray(parsed)
+			? parsed[0]
+			: parsed && typeof parsed === "object"
+				? Object.values(parsed)[0]
+				: undefined;
+		if (!packResult || typeof packResult !== "object") {
+			throw new Error("npm pack did not return a package manifest");
+		}
+		const files =
+			(packResult as { files?: Array<{ path?: unknown }> }).files ?? [];
+		const paths = new Set(
+			files.flatMap((file) =>
+				typeof file.path === "string" ? [file.path] : [],
+			),
+		);
+
+		for (const requiredPath of [
+			"extensions/voice.ts",
+			"extensions/voice/macos-audio.swift",
+			"extensions/voice/Info.plist",
+			"extensions/voice/Entitlements.plist",
+			"extensions/voice/windows-audio.cs",
+			"extensions/voice/windows-audio.ps1",
+		]) {
+			expect(paths.has(requiredPath)).toBe(true);
 		}
 	});
 });

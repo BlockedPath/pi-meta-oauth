@@ -379,6 +379,7 @@ export function toProviderModels(
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
 		const fallback = FALLBACK_MODELS.find((model) => model.id === entry.id);
+		if (!metadata && !fallback) return [];
 		const catalogName =
 			metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
