@@ -60,7 +60,7 @@ describe("Meta OAuth provider", () => {
 	// Live-endpoint drift, observed 2026-08-10: GET /v1/models returned bare
 	// OpenAI-style objects -- {id, object, created, owned_by} -- without a
 	// metadata["muse-code"] block. Known IDs must therefore map entirely from
-	// FALLBACK_MODELS; unknown bare IDs are omitted until a safe fallback exists.
+	// FALLBACK_MODELS; unknown IDs need complete standalone metadata to be safe.
 	test("maps known bare catalog entries to complete bundled metadata", () => {
 		const models = toProviderModels({
 			data: LIVE_CATALOG_SNAPSHOT_2026_08_10.map((id) => ({ id })),
@@ -69,10 +69,35 @@ describe("Meta OAuth provider", () => {
 		expect(models).toEqual(createMetaProviderConfig().models ?? []);
 	});
 
-	test("omits unknown bare IDs but maps unknown metadata-backed IDs", () => {
+	test("omits unknown IDs without complete standalone metadata", () => {
 		const models = toProviderModels({
 			data: [
 				{ id: "muse-bare-unknown" },
+				{ id: "muse-empty-metadata", metadata: { "muse-code": {} } },
+				{
+					id: "muse-missing-limits",
+					metadata: {
+						"muse-code": { cost: { input: "1", output: "2" } },
+					},
+				},
+				{
+					id: "muse-missing-output-cost",
+					metadata: {
+						"muse-code": {
+							limit: { context: 123_000, output: 45_000 },
+							cost: { input: "1" },
+						},
+					},
+				},
+				{
+					id: "muse-blank-input-cost",
+					metadata: {
+						"muse-code": {
+							limit: { context: 123_000, output: 45_000 },
+							cost: { input: " ", output: "2" },
+						},
+					},
+				},
 				{
 					id: "muse-metadata-unknown",
 					metadata: {

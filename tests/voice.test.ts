@@ -69,7 +69,7 @@ describe("Meta voice mode", () => {
 		const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
 		const output = execFileSync(
 			npmExecutable,
-			["pack", "--dry-run", "--json"],
+			["pack", "--dry-run", "--json", "--ignore-scripts"],
 			{ cwd: projectRoot, encoding: "utf8" },
 		);
 		const parsed = JSON.parse(output) as unknown;
