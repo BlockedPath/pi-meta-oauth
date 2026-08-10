@@ -1,0 +1,30 @@
+---
+badge_ci:
+  enabled: "true"
+  settings:
+    label: "CI"
+    logo: "github"
+    color: "darkgreen"
+    label_color: "black"
+
+badge_wip:
+  enabled: "true"
+  settings:
+    color: "yellow"
+    label: "WIP"
+    logo: "vlcmediaplayer"
+
+badge_hotfix:
+  enabled: "true"
+  settings:
+    color: "red"
+    text_color: "white"
+    label: "HOTFIX"
+    production_branch: "main"
+
+badge_base_branch:
+  enabled: "true"
+  settings:
+    base_branch: "main"
+    color: "orange"
+    label: "Target"

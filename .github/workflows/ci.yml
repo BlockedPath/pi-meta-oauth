@@ -6,6 +6,11 @@ name: CI
     branches:
       - main
   pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
   workflow_dispatch:
 
 permissions:
@@ -16,6 +21,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  badgetizr-start:
+    name: Add initial PR badges
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out Badgetizr 3.1.1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: aiKrice/homebrew-badgetizr
+          ref: c616a5ccc6a59cfdf02c6645af6904df073259de # 3.1.1
+          path: .badgetizr-action
+          persist-credentials: false
+
+      - name: Install pinned yq
+        env:
+          YQ_VERSION: v4.47.2
+        run: |
+          yq_sha256="1bb99e1019e23de33c7e6afc23e93dad"
+          yq_sha256="${yq_sha256}72aad6cf2cb03c797f068ea79814ddb0"
+          curl --fail --location --silent --show-error \
+            --output /tmp/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${yq_sha256}  /tmp/yq" | sha256sum --check --strict
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+
+      - name: Mark CI as running
+        env:
+          BADGETIZR_DESTINATION: ${{ github.event.pull_request.base.ref }}
+          BADGETIZR_PR: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        working-directory: .badgetizr-action
+        run: |
+          badgetizr_build_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          badgetizr_build_url="${badgetizr_build_url}/actions/runs"
+          badgetizr_build_url="${badgetizr_build_url}/${GITHUB_RUN_ID}"
+          ./badgetizr \
+            --provider=github \
+            --configuration=../.badgetizr.yml \
+            --pr-id="${BADGETIZR_PR}" \
+            --pr-destination-branch="${BADGETIZR_DESTINATION}" \
+            --pr-build-number="${GITHUB_RUN_ID}" \
+            --pr-build-url="${badgetizr_build_url}" \
+            --ci-status=started \
+            --ci-text="Typecheck and test"
+
   typecheck-and-test:
     name: Typecheck and test
     runs-on: ubuntu-latest
@@ -40,3 +103,70 @@ jobs:
 
       - name: Test
         run: bun test
+
+  badgetizr-result:
+    name: Update final PR badges
+    needs:
+      - badgetizr-start
+      - typecheck-and-test
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out Badgetizr 3.1.1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: aiKrice/homebrew-badgetizr
+          ref: c616a5ccc6a59cfdf02c6645af6904df073259de # 3.1.1
+          path: .badgetizr-action
+          persist-credentials: false
+
+      - name: Install pinned yq
+        env:
+          YQ_VERSION: v4.47.2
+        run: |
+          yq_sha256="1bb99e1019e23de33c7e6afc23e93dad"
+          yq_sha256="${yq_sha256}72aad6cf2cb03c797f068ea79814ddb0"
+          curl --fail --location --silent --show-error \
+            --output /tmp/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${yq_sha256}  /tmp/yq" | sha256sum --check --strict
+          sudo install -m 0755 /tmp/yq /usr/local/bin/yq
+
+      - name: Update CI result
+        env:
+          BADGETIZR_DESTINATION: ${{ github.event.pull_request.base.ref }}
+          BADGETIZR_PR: ${{ github.event.pull_request.number }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          TEST_RESULT: ${{ needs.typecheck-and-test.result }}
+        working-directory: .badgetizr-action
+        run: |
+          badgetizr_build_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          badgetizr_build_url="${badgetizr_build_url}/actions/runs"
+          badgetizr_build_url="${badgetizr_build_url}/${GITHUB_RUN_ID}"
+          if [[ "${TEST_RESULT}" == "success" ]]; then
+            badgetizr_status="passed"
+          else
+            badgetizr_status="failed"
+          fi
+          ./badgetizr \
+            --provider=github \
+            --configuration=../.badgetizr.yml \
+            --pr-id="${BADGETIZR_PR}" \
+            --pr-destination-branch="${BADGETIZR_DESTINATION}" \
+            --pr-build-number="${GITHUB_RUN_ID}" \
+            --pr-build-url="${badgetizr_build_url}" \
+            --ci-status="${badgetizr_status}"
