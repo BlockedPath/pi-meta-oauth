@@ -14,6 +14,7 @@ export const META_MODEL_CATALOG_URL = "https://api.meta.ai/v1/models";
 export const META_AUTH_BASE_URL = "https://auth.meta.com";
 export const META_CLIENT_ID = "1031625952748946";
 export const META_FILES_URL = `${META_API_BASE_URL}/files`;
+const META_ENV_VAR = "META_API_KEY";
 
 const DEVICE_AUTHORIZATION_URL = `${META_AUTH_BASE_URL}/oidc/device/authorization/`;
 const DEVICE_TOKEN_URL = `${META_AUTH_BASE_URL}/oidc/device/token/`;
@@ -72,10 +73,6 @@ interface MetaCatalogModel {
 		};
 	};
 }
-
-type MuseCodeMetadata = NonNullable<
-	NonNullable<MetaCatalogModel["metadata"]>["muse-code"]
->;
 
 // Media capabilities kept as "text"+"image" for pi-ai type compat (pi-ai 0.83/0.84 only allows those),
 // with "video"/"audio" advertised via cast so future pi-ai that expands the union picks them up.
@@ -333,38 +330,20 @@ export async function refreshMetaToken(
 	};
 }
 
-function isFinitePositive(value: unknown): value is number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
-function parseNumericCost(value: unknown): number | undefined {
-	const number =
-		typeof value === "number"
-			? value
-			: typeof value === "string" && value.trim()
-				? Number(value)
-				: Number.NaN;
-	return Number.isFinite(number) && number >= 0 ? number : undefined;
-}
-
 function finitePositive(value: unknown, fallback: number): number {
-	return isFinitePositive(value) ? value : fallback;
+	return typeof value === "number" && Number.isFinite(value) && value > 0
+		? value
+		: fallback;
 }
 
 function numericCost(value: unknown, fallback: number): number {
-	return parseNumericCost(value) ?? fallback;
-}
-
-function hasCompleteStandaloneMetadata(
-	metadata: MuseCodeMetadata | undefined,
-): boolean {
-	return Boolean(
-		metadata &&
-			isFinitePositive(metadata.limit?.context) &&
-			isFinitePositive(metadata.limit?.output) &&
-			parseNumericCost(metadata.cost?.input) !== undefined &&
-			parseNumericCost(metadata.cost?.output) !== undefined,
-	);
+	const number =
+		typeof value === "number"
+			? value
+			: typeof value === "string"
+				? Number(value)
+				: Number.NaN;
+	return Number.isFinite(number) && number >= 0 ? number : fallback;
 }
 
 function displayName(id: string): string {
@@ -401,7 +380,6 @@ export function toProviderModels(
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
 		const fallback = FALLBACK_MODELS.find((model) => model.id === entry.id);
-		if (!fallback && !hasCompleteStandaloneMetadata(metadata)) return [];
 		const catalogName =
 			metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
@@ -485,6 +463,7 @@ export function createMetaProviderConfig(): ProviderConfig {
 		name: "Meta Model API",
 		baseUrl: META_API_BASE_URL,
 		api: "openai-responses",
+		apiKey: "$META_API_KEY",
 		models: [...FALLBACK_MODELS],
 		refreshModels: refreshMetaModels,
 		oauth: {
@@ -497,5 +476,12 @@ export function createMetaProviderConfig(): ProviderConfig {
 }
 
 export default function metaOAuthProvider(pi: ExtensionAPI): void {
+	// Allow MODEL_API_KEY as fallback for API-key users — shim to META_API_KEY so $META_API_KEY interpolation works.
+	if (!process.env[META_ENV_VAR] && process.env["MODEL_API_KEY"]) {
+		process.env[META_ENV_VAR] = process.env["MODEL_API_KEY"];
+	}
+	if (!process.env["MODEL_API_KEY"] && process.env[META_ENV_VAR]) {
+		process.env["MODEL_API_KEY"] = process.env[META_ENV_VAR];
+	}
 	pi.registerProvider(META_PROVIDER_ID, createMetaProviderConfig());
 }
