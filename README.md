@@ -66,6 +66,21 @@ Optional overrides:
 - `PI_META_VOICE_ASR_ENDPOINT`
 - `PI_META_VOICE_ASR_MODEL`
 
+## Media tools
+
+Text-only Pi models can delegate media inspection to Muse Spark without switching models:
+
+- `meta_analyze_file` inspects one or more images, PDFs, audio files, or videos. Use ordered `sources` with optional labels for comparisons such as before and after screenshots.
+- `meta_describe_video` analyzes MP4 visuals and embedded audio.
+- `meta_transcribe_audio` transcribes MP3 or WAV speech.
+- `meta_upload_file` uploads a large or reusable file and returns a Meta `file_id`.
+
+Give each analysis tool a task-specific prompt that asks for the evidence the calling model needs next. Analysis tools default to an 8,000-token Muse generation budget and accept `max_output_tokens` from 4,000 to 32,000. Inline tool output defaults to 20,000 characters and accepts `max_chars` up to 50,000. If a result is truncated, the complete text is saved to a temporary file so the agent can continue with Pi's `read` tool using `offset` and `limit`.
+
+Automatic uploads made during analysis expire after 24 hours. Explicit `meta_upload_file` uploads expire after seven days by default; set `expires_after_seconds` to choose another supported duration or `retain: true` to keep a file without expiry.
+
+Media tool failures are reported as failed Pi tool calls, allowing the calling model to retry or report the blocker. Media analysis is model-generated observation, so verify consequential details when another source is available.
+
 ## Models
 
 Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh`.
