@@ -59,8 +59,11 @@ describe("Meta OAuth provider", () => {
 
 	// Live-endpoint drift, observed 2026-08-10: GET /v1/models returned bare
 	// OpenAI-style objects -- {id, object, created, owned_by} -- without a
-	// metadata["muse-code"] block. Known IDs must therefore map entirely from
-	// FALLBACK_MODELS; unknown IDs need complete standalone metadata to be safe.
+	// metadata["muse-code"] block. Known IDs map entirely from FALLBACK_MODELS;
+	// unknown IDs now also map with fallback defaults (relaxed gate) so future
+	// models appear without code changes — missing limits/costs fall back to
+	// defaults via finitePositive()/numericCost() (empty/whitespace cost strings
+	// treated as missing).
 	test("maps known bare catalog entries to complete bundled metadata", () => {
 		const models = toProviderModels({
 			data: LIVE_CATALOG_SNAPSHOT_2026_08_10.map((id) => ({ id })),
@@ -69,7 +72,7 @@ describe("Meta OAuth provider", () => {
 		expect(models).toEqual(createMetaProviderConfig().models ?? []);
 	});
 
-	test("omits unknown IDs without complete standalone metadata", () => {
+	test("maps unknown IDs with incomplete metadata to fallback defaults", () => {
 		const models = toProviderModels({
 			data: [
 				{ id: "muse-bare-unknown" },
@@ -112,8 +115,35 @@ describe("Meta OAuth provider", () => {
 			],
 		});
 
-		expect(models).toHaveLength(1);
-		expect(models[0]).toMatchObject({
+		// Relaxed gate: every non-hidden id is emitted; missing fields fall back.
+		expect(models).toHaveLength(6);
+		const byId = Object.fromEntries(models.map((m) => [m.id, m]));
+		expect(byId["muse-bare-unknown"]).toMatchObject({
+			contextWindow: 1_048_576,
+			maxTokens: 256_000,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		});
+		expect(byId["muse-empty-metadata"]).toMatchObject({
+			contextWindow: 1_048_576,
+			maxTokens: 256_000,
+		});
+		expect(byId["muse-missing-limits"]).toMatchObject({
+			contextWindow: 1_048_576,
+			maxTokens: 256_000,
+			cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+		});
+		expect(byId["muse-missing-output-cost"]).toMatchObject({
+			contextWindow: 123_000,
+			maxTokens: 45_000,
+			cost: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 },
+		});
+		// Blank/whitespace cost strings are treated as missing → fallback, not 0-as-free.
+		expect(byId["muse-blank-input-cost"]).toMatchObject({
+			contextWindow: 123_000,
+			maxTokens: 45_000,
+			cost: { input: 0, output: 2, cacheRead: 0, cacheWrite: 0 },
+		});
+		expect(byId["muse-metadata-unknown"]).toMatchObject({
 			id: "muse-metadata-unknown",
 			name: "Muse Metadata Unknown",
 			contextWindow: 123_000,

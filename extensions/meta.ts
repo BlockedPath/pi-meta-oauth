@@ -340,7 +340,7 @@ function numericCost(value: unknown, fallback: number): number {
 	const number =
 		typeof value === "number"
 			? value
-			: typeof value === "string"
+			: typeof value === "string" && value.trim()
 				? Number(value)
 				: Number.NaN;
 	return Number.isFinite(number) && number >= 0 ? number : fallback;
@@ -477,10 +477,16 @@ export function createMetaProviderConfig(): ProviderConfig {
 
 export default function metaOAuthProvider(pi: ExtensionAPI): void {
 	// Allow MODEL_API_KEY as fallback for API-key users — shim to META_API_KEY so $META_API_KEY interpolation works.
-	if (!process.env[META_ENV_VAR] && process.env["MODEL_API_KEY"]) {
+	if (
+		process.env[META_ENV_VAR] === undefined &&
+		process.env["MODEL_API_KEY"] !== undefined
+	) {
 		process.env[META_ENV_VAR] = process.env["MODEL_API_KEY"];
 	}
-	if (!process.env["MODEL_API_KEY"] && process.env[META_ENV_VAR]) {
+	if (
+		process.env["MODEL_API_KEY"] === undefined &&
+		process.env[META_ENV_VAR] !== undefined
+	) {
 		process.env["MODEL_API_KEY"] = process.env[META_ENV_VAR];
 	}
 	pi.registerProvider(META_PROVIDER_ID, createMetaProviderConfig());
