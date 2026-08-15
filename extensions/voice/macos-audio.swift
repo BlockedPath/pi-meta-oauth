@@ -73,22 +73,12 @@ private final class MicrophoneSession {
         }
         let tapBufferSize = AVAudioFrameCount(inputFormat.sampleRate * 0.1)
         do {
-            if #available(macOS 27.0, *) {
-                try inputNode.__installTap(
-                    onBus: 0,
-                    bufferSize: tapBufferSize,
-                    format: inputFormat,
-                    error: (),
-                    block: tap
-                )
-            } else {
-                inputNode.installTap(
-                    onBus: 0,
-                    bufferSize: tapBufferSize,
-                    format: inputFormat,
-                    block: tap
-                )
-            }
+            inputNode.installTap(
+                onBus: 0,
+                bufferSize: tapBufferSize,
+                format: inputFormat,
+                block: tap
+            )
             audioEngine.prepare()
             try audioEngine.start()
         } catch {
