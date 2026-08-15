@@ -211,8 +211,7 @@ describe("Meta OAuth provider", () => {
 				device_code: "device-token",
 				user_code: "ABCD-1234",
 				verification_uri: "https://auth.meta.com/device",
-				verification_uri_complete:
-					"https://auth.meta.com/device?code=ABCD-1234",
+				verification_uri_complete: "https://auth.meta.com/device?code=ABCD-1234",
 				expires_in: 900,
 				interval: 1,
 			}),

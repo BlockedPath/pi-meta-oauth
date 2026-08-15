@@ -249,9 +249,7 @@ export async function loginMeta(
 	}
 	const device = authorization.body;
 	if (!device.device_code || !device.user_code || !device.verification_uri) {
-		throw new Error(
-			"Meta device authorization returned an incomplete response",
-		);
+		throw new Error("Meta device authorization returned an incomplete response");
 	}
 
 	let intervalSeconds =
@@ -265,8 +263,7 @@ export async function loginMeta(
 	const deadline = Date.now() + expiresInSeconds * 1000;
 	callbacks.onDeviceCode({
 		userCode: device.user_code,
-		verificationUri:
-			device.verification_uri_complete || device.verification_uri,
+		verificationUri: device.verification_uri_complete || device.verification_uri,
 		intervalSeconds,
 		expiresInSeconds,
 	});
@@ -380,19 +377,17 @@ export function toProviderModels(
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
 		const fallback = FALLBACK_MODELS.find((model) => model.id === entry.id);
-		const catalogName =
-			metadata?.name === entry.id ? undefined : metadata?.name;
+		const catalogName = metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
-		const thinkingLevelMap: NonNullable<MetaProviderModel["thinkingLevelMap"]> =
-			{
-				off: null,
-				minimal: variants.minimal?.reasoningEffort ?? "minimal",
-				low: variants.low?.reasoningEffort ?? "low",
-				medium: variants.medium?.reasoningEffort ?? "medium",
-				high: variants.high?.reasoningEffort ?? "high",
-				xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
-				max: null,
-			};
+		const thinkingLevelMap: NonNullable<MetaProviderModel["thinkingLevelMap"]> = {
+			off: null,
+			minimal: variants.minimal?.reasoningEffort ?? "minimal",
+			low: variants.low?.reasoningEffort ?? "low",
+			medium: variants.medium?.reasoningEffort ?? "medium",
+			high: variants.high?.reasoningEffort ?? "high",
+			xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
+			max: null,
+		};
 		return [
 			{
 				id: entry.id,
@@ -402,10 +397,7 @@ export function toProviderModels(
 				input: modalitiesToInput(metadata?.modalities?.input, fallback?.input),
 				cost: {
 					input: numericCost(metadata?.cost?.input, fallback?.cost.input ?? 0),
-					output: numericCost(
-						metadata?.cost?.output,
-						fallback?.cost.output ?? 0,
-					),
+					output: numericCost(metadata?.cost?.output, fallback?.cost.output ?? 0),
 					cacheRead: numericCost(
 						metadata?.cost?.cached,
 						fallback?.cost.cacheRead ?? 0,
