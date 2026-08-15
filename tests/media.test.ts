@@ -243,6 +243,8 @@ describe("Meta media payload rewrite", () => {
 			const form = init?.body as FormData;
 			uploadedFile = form.get("file") as File;
 			expect(form.get("purpose")).toBe("user_data");
+			expect(form.get("expires_after[anchor]")).toBe("created_at");
+			expect(form.get("expires_after[seconds]")).toBe(String(24 * 60 * 60));
 			expect((init?.headers as Record<string, string>).Authorization).toBe(
 				"Bearer test-key",
 			);
@@ -282,6 +284,106 @@ describe("Meta media payload rewrite", () => {
 			expect(uploadedFile?.type).toBe("video/mp4");
 		} finally {
 			globalThis.fetch = originalFetch;
+		}
+	});
+});
+
+
+describe("Meta media tool contracts", () => {
+	function registeredTools(): Map<string, any> {
+		const tools = new Map<string, any>();
+		const pi = {
+			on() {},
+			registerCommand() {},
+			registerTool(tool: { name: string }) {
+				tools.set(tool.name, tool);
+			},
+		} as unknown as ExtensionAPI;
+		metaMedia(pi);
+		return tools;
+	}
+
+	const context = {
+		cwd: process.cwd(),
+		modelRegistry: { getApiKeyForProvider: async () => "test-key" },
+		ui: { notify() {} },
+	};
+
+	test("rejects invalid sources and Meta API failures as failed tool calls", async () => {
+		const tool = registeredTools().get("meta_analyze_file");
+		await expect(tool.execute("missing", { prompt: "inspect" }, undefined, undefined, context)).rejects.toThrow(
+			"requires exactly one path/url/file_id or a sources array",
+		);
+		await expect(tool.execute("local", {
+			sources: [{ source: "file-report.pdf" }],
+			prompt: "inspect",
+		}, undefined, undefined, context)).rejects.toThrow("File not found");
+
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (_input, _init) =>
+			new Response(JSON.stringify({ error: "unavailable" }), { status: 503 })) as typeof fetch;
+		try {
+			await expect(tool.execute("api", {
+				url: "https://example.com/image.png",
+				prompt: "inspect",
+			}, undefined, undefined, context)).rejects.toThrow("File analysis failed: Meta Responses failed (HTTP 503)");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("preserves ordered labels in one multi-file request", async () => {
+		const originalFetch = globalThis.fetch;
+		let requestBody: Record<string, any> | undefined;
+		globalThis.fetch = (async (_input, init) => {
+			requestBody = JSON.parse(String(init?.body)) as Record<string, any>;
+			return new Response(JSON.stringify({ output_text: "comparison", usage: { input_tokens: 10, output_tokens: 2 } }), {
+				status: 200,
+			});
+		}) as typeof fetch;
+		try {
+			const tool = registeredTools().get("meta_analyze_file");
+			const result = await tool.execute("multi", {
+				sources: [
+					{ source: "https://example.com/before.png", label: "Before" },
+					{ source: "https://example.com/after.png", label: "After" },
+				],
+				prompt: "Compare the screenshots",
+			}, undefined, undefined, context);
+			expect(result.content[0].text).toBe("comparison");
+			const content = requestBody?.input?.[0]?.content;
+			expect(content?.map((block: Record<string, unknown>) => block.type)).toEqual([
+				"input_text", "input_text", "input_file", "input_text", "input_file",
+			]);
+			expect(content?.[1]?.text).toBe("Before:");
+			expect(content?.[3]?.text).toBe("After:");
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("explicit uploads expire after seven days by default", async () => {
+		const originalFetch = globalThis.fetch;
+		const directory = mkdtempSync(join(tmpdir(), "pi-meta-upload-"));
+		const file = join(directory, "note.txt");
+		writeFileSync(file, "hello");
+		let form: FormData | undefined;
+		globalThis.fetch = (async (_input, init) => {
+			form = init?.body as FormData;
+			return new Response(JSON.stringify({ id: "file-expiring", bytes: 5, status: "uploaded" }), { status: 200 });
+		}) as typeof fetch;
+		try {
+			const tool = registeredTools().get("meta_upload_file");
+			await tool.execute("upload", { path: file }, undefined, undefined, context);
+			expect(form?.get("expires_after[anchor]")).toBe("created_at");
+			expect(form?.get("expires_after[seconds]")).toBe(String(7 * 24 * 60 * 60));
+
+			await tool.execute("retain", { path: file, retain: true }, undefined, undefined, context);
+			expect(form?.get("expires_after[anchor]")).toBeNull();
+			expect(form?.get("expires_after[seconds]")).toBeNull();
+		} finally {
+			globalThis.fetch = originalFetch;
+			rmSync(directory, { recursive: true, force: true });
 		}
 	});
 });
