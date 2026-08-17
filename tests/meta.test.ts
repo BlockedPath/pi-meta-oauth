@@ -12,6 +12,7 @@ import {
 	META_PROVIDER_ID,
 	mintMetaApiKey,
 	refreshMetaModels,
+	refreshMetaToken,
 	toProviderModels,
 } from "../extensions/meta.ts";
 
@@ -318,6 +319,105 @@ describe("Meta OAuth provider", () => {
 			contextWindow: fallback.contextWindow,
 		});
 		expect("provider" in models[0]).toBe(false);
+	});
+
+	test("does not persist an empty catalog and restores the previous cache", async () => {
+		const fallback = (createMetaProviderConfig().models ?? [])[0];
+		if (!fallback) throw new Error("Meta fallback model is required");
+		const cached: ModelsStoreEntry = {
+			models: [
+				{
+					...fallback,
+					provider: META_PROVIDER_ID,
+					api: "openai-responses" as const,
+					baseUrl: META_API_BASE_URL,
+				},
+			],
+			checkedAt: Date.now(),
+		};
+		let persisted: ModelsStoreEntry | undefined = cached;
+		const context = {
+			credential: { type: "api_key", key: "model-api-key" },
+			store: {
+				read: async () => persisted,
+				write: async (entry: ModelsStoreEntry) => {
+					persisted = entry;
+				},
+				delete: async () => {
+					persisted = undefined;
+				},
+			},
+			allowNetwork: true,
+			signal: new AbortController().signal,
+		} satisfies RefreshModelsContext;
+		const models = await refreshMetaModels(
+			context,
+			(async () => jsonResponse({ data: [] })) as unknown as typeof fetch,
+		);
+
+		expect(models).toHaveLength(1);
+		expect(models[0]?.id).toBe(fallback.id);
+		expect(persisted).toBe(cached);
+	});
+
+	test("restores the persisted catalog when a network refresh fails", async () => {
+		const fallback = (createMetaProviderConfig().models ?? [])[0];
+		if (!fallback) throw new Error("Meta fallback model is required");
+		const context = {
+			credential: { type: "api_key", key: "model-api-key" },
+			store: {
+				read: async () => ({
+					models: [
+						{
+							...fallback,
+							provider: META_PROVIDER_ID,
+							api: "openai-responses" as const,
+							baseUrl: META_API_BASE_URL,
+						},
+					],
+					checkedAt: Date.now(),
+				}),
+				write: async () => {
+					throw new Error("should not persist a failed refresh");
+				},
+				delete: async () => {},
+			},
+			allowNetwork: true,
+			signal: new AbortController().signal,
+		} satisfies RefreshModelsContext;
+		const models = await refreshMetaModels(context, (async () => {
+			throw new Error("catalog unreachable");
+		}) as unknown as typeof fetch);
+
+		expect(models).toHaveLength(1);
+		expect(models[0]?.id).toBe(fallback.id);
+	});
+
+	test("treats a Pi 0.84 AbortSignal as cancellation, not a fetch mock", async () => {
+		await expect(
+			refreshMetaToken(
+				{
+					refresh: "identity-token",
+					access: "old-key",
+					expires: Date.now(),
+				},
+				AbortSignal.abort(),
+			),
+		).rejects.toThrow("Meta token refresh was cancelled");
+	});
+
+	test("still accepts a fetch mock in the refreshToken second argument", async () => {
+		const credentials = await refreshMetaToken(
+			{
+				refresh: "identity-token",
+				access: "old-key",
+				expires: Date.now(),
+			},
+			(async () =>
+				jsonResponse({ api_key: "rotated-key" })) as unknown as typeof fetch,
+		);
+		expect(credentials.access).toBe("rotated-key");
+		expect(credentials.refresh).toBe("identity-token");
 	});
 
 	liveCatalogTest("live catalog IDs have bundled fallbacks", async () => {

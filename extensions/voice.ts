@@ -6,33 +6,29 @@ import { META_PROVIDER_ID } from "./meta.ts";
 import { isKeyRelease, isKeyRepeat, matchesKey } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
-import { homedir, platform } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+	asrEndpoint,
+	chooseTranscript,
+	DEFAULT_ASR_MODEL,
+	formatAuthorization,
+	isNormalSocketClose,
+	parseJsonObject,
+	pcmAudioLevel,
+	socketMessageText,
+} from "./voice/asr.ts";
+import {
+	ensureHelper,
+	isSupportedPlatform,
+	supportedPlatformLabel,
+} from "./voice/helpers.ts";
+
+export { asrEndpoint, formatAuthorization, pcmAudioLevel } from "./voice/asr.ts";
 
 const AGENT_DIR = join(homedir(), ".pi/agent");
 const SETTINGS_FILE = join(AGENT_DIR, "pi-meta-oauth-voice.json");
-const EXTENSION_DIR = dirname(fileURLToPath(import.meta.url));
-const HELPER_DIR = join(EXTENSION_DIR, "voice");
-const HELPER_SOURCE = join(HELPER_DIR, "macos-audio.swift");
-const HELPER_PLIST = join(HELPER_DIR, "Info.plist");
-const HELPER_ENTITLEMENTS = join(HELPER_DIR, "Entitlements.plist");
-const HELPER_BINARY = join(AGENT_DIR, "bin/pi-meta-oauth-voice-v1");
-// Windows helpers
-const WINDOWS_HELPER_SOURCE = join(HELPER_DIR, "windows-audio.cs");
-const WINDOWS_HELPER_PS1 = join(HELPER_DIR, "windows-audio.ps1");
-const WINDOWS_HELPER_BINARY = join(AGENT_DIR, "bin/pi-meta-oauth-voice-v1.exe");
-
-const DEFAULT_ASR_ENDPOINT =
-	"wss://shortwave.facebook.com/voyager/v1/asr/duplex";
-const DEFAULT_ASR_MODEL = "prod_tbh";
 const AUDIO_FRAME_BYTES = 3_200;
 const ASR_PREBUFFER_FRAMES = 6;
 const MAX_QUEUED_AUDIO_BYTES = 2 * 1024 * 1024;
@@ -43,29 +39,10 @@ const FINAL_TRANSCRIPT_TIMEOUT_MS = 6_000;
 type Settings = { enabled: boolean };
 type VoicePhase = "idle" | "preparing" | "recording" | "stopping";
 type HelperEvent = Record<string, unknown> & { type?: string };
-
 type AsrTranscript = {
 	transcript?: unknown;
 	final?: unknown;
 };
-
-function isMacOS(): boolean {
-	return platform() === "darwin";
-}
-
-function isWindows(): boolean {
-	return platform() === "win32";
-}
-
-function isSupportedPlatform(): boolean {
-	return isMacOS() || isWindows();
-}
-
-function supportedPlatformLabel(): string {
-	if (isMacOS()) return "macOS";
-	if (isWindows()) return "Windows";
-	return `${platform()}`;
-}
 
 function loadSettings(): Settings {
 	if (existsSync(SETTINGS_FILE)) {
@@ -90,295 +67,6 @@ function combineEditorText(original: string, transcript: string): string {
 	if (!original.trim()) return transcript.trim();
 	if (!transcript.trim()) return original;
 	return `${original.replace(/\s+$/, "")} ${transcript.trim()}`;
-}
-
-export function pcmAudioLevel(chunk: Buffer): number {
-	if (chunk.length < 2) return 0;
-	let sumSquares = 0;
-	let samples = 0;
-	for (let offset = 0; offset + 1 < chunk.length; offset += 4) {
-		const normalized = chunk.readInt16LE(offset) / 32_768;
-		sumSquares += normalized * normalized;
-		samples += 1;
-	}
-	if (samples === 0) return 0;
-	const rms = Math.sqrt(sumSquares / samples);
-	return Math.min(1, Math.log10(1 + rms * 90));
-}
-
-function hypothesisWords(value: string): string[] {
-	return value
-		.trim()
-		.split(/\s+/)
-		.map((word) => word.toLocaleLowerCase().replace(/[^\p{L}\p{N}'’]/gu, ""))
-		.filter(Boolean);
-}
-
-function chooseTranscript(previous: string, incoming: string): string {
-	const next = incoming.trim();
-	if (!next) return previous;
-	if (!previous.trim()) return next;
-
-	const previousWords = hypothesisWords(previous);
-	const nextWords = hypothesisWords(next);
-	const sharedLength = Math.min(previousWords.length, nextWords.length);
-	let commonPrefix = 0;
-	while (
-		commonPrefix < sharedLength &&
-		previousWords[commonPrefix] === nextWords[commonPrefix]
-	) {
-		commonPrefix += 1;
-	}
-
-	if (commonPrefix === sharedLength || commonPrefix >= 2) {
-		const isRegression =
-			nextWords.length < previousWords.length &&
-			nextWords.every((word, index) => previousWords[index] === word);
-		return isRegression ? previous : next;
-	}
-	return next.length >= previous.length ? next : previous;
-}
-
-export function formatAuthorization(apiKey: string): string {
-	return apiKey.startsWith("OAuth ") ? apiKey : `OAuth ${apiKey}`;
-}
-
-export function asrEndpoint(sessionId: string): string {
-	const configured =
-		process.env.PI_META_VOICE_ASR_ENDPOINT ??
-		process.env.MUSE_VOICE_ASR_ENDPOINT ??
-		DEFAULT_ASR_ENDPOINT;
-	let endpoint: URL;
-	try {
-		endpoint = new URL(configured);
-	} catch {
-		throw new Error("Voice ASR endpoint is not a valid URL");
-	}
-	const localInsecureEndpoint =
-		endpoint.protocol === "ws:" &&
-		(endpoint.hostname === "localhost" || endpoint.hostname === "127.0.0.1");
-	if (endpoint.protocol !== "wss:" && !localInsecureEndpoint) {
-		throw new Error(
-			"Voice ASR endpoint must use wss:// (or ws://localhost for testing)",
-		);
-	}
-	endpoint.searchParams.set("sessionId", sessionId);
-	return endpoint.toString();
-}
-
-async function socketMessageText(data: unknown): Promise<string | undefined> {
-	if (typeof data === "string") return data;
-	if (data instanceof Blob) return data.text();
-	if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
-	if (ArrayBuffer.isView(data)) {
-		return Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString(
-			"utf8",
-		);
-	}
-	return undefined;
-}
-
-function parseJsonObject(text: string): Record<string, unknown> | undefined {
-	try {
-		const value = JSON.parse(text) as unknown;
-		if (value && typeof value === "object" && !Array.isArray(value)) {
-			return value as Record<string, unknown>;
-		}
-	} catch {
-		// Ignore non-JSON ASR messages.
-	}
-	return undefined;
-}
-
-async function runProcess(command: string, args: string[]): Promise<void> {
-	await new Promise<void>((resolve, reject) => {
-		const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-		let stdout = "";
-		let stderr = "";
-		child.stdout?.on("data", (chunk: Buffer) => {
-			stdout = `${stdout}${chunk.toString("utf8")}`.slice(-8_000);
-		});
-		child.stderr?.on("data", (chunk: Buffer) => {
-			stderr = `${stderr}${chunk.toString("utf8")}`.slice(-8_000);
-		});
-		child.once("error", reject);
-		child.once("close", (code) => {
-			if (code === 0) {
-				resolve();
-				return;
-			}
-			reject(
-				new Error(
-					(
-						stderr ||
-						stdout ||
-						`${command} exited with code ${code ?? "unknown"}`
-					).trim(),
-				),
-			);
-		});
-	});
-}
-
-function helperNeedsBuild(): boolean {
-	if (!existsSync(HELPER_BINARY)) return true;
-	const binaryTime = statSync(HELPER_BINARY).mtimeMs;
-	return [HELPER_SOURCE, HELPER_PLIST, HELPER_ENTITLEMENTS].some(
-		(path) => !existsSync(path) || statSync(path).mtimeMs > binaryTime,
-	);
-}
-
-function windowsHelperNeedsBuild(): boolean {
-	if (!existsSync(WINDOWS_HELPER_BINARY)) return true;
-	if (!existsSync(WINDOWS_HELPER_SOURCE)) return false;
-	const binaryTime = statSync(WINDOWS_HELPER_BINARY).mtimeMs;
-	return statSync(WINDOWS_HELPER_SOURCE).mtimeMs > binaryTime;
-}
-
-async function ensureMacOSHelper(): Promise<string> {
-	if (!isMacOS()) {
-		throw new Error(
-			"Muse-style voice input is currently available only on macOS and Windows",
-		);
-	}
-	if (
-		!existsSync(HELPER_SOURCE) ||
-		!existsSync(HELPER_PLIST) ||
-		!existsSync(HELPER_ENTITLEMENTS)
-	) {
-		throw new Error("The macOS microphone helper sources are incomplete");
-	}
-	if (!helperNeedsBuild()) return HELPER_BINARY;
-
-	mkdirSync(join(AGENT_DIR, "bin"), { recursive: true });
-	await runProcess("/usr/bin/xcrun", [
-		"swiftc",
-		HELPER_SOURCE,
-		"-o",
-		HELPER_BINARY,
-		"-framework",
-		"AVFoundation",
-		"-Xlinker",
-		"-sectcreate",
-		"-Xlinker",
-		"__TEXT",
-		"-Xlinker",
-		"__info_plist",
-		"-Xlinker",
-		HELPER_PLIST,
-	]);
-	await runProcess("/usr/bin/codesign", [
-		"--force",
-		"--sign",
-		"-",
-		"--entitlements",
-		HELPER_ENTITLEMENTS,
-		HELPER_BINARY,
-	]);
-	return HELPER_BINARY;
-}
-
-async function tryCompileWindowsHelper(): Promise<boolean> {
-	if (!existsSync(WINDOWS_HELPER_SOURCE)) return false;
-	mkdirSync(join(AGENT_DIR, "bin"), { recursive: true });
-
-	const candidates: string[] = [
-		"csc",
-		"csc.exe",
-		"C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe",
-		"C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe",
-	];
-	// Also try where-found csc via PATH expansion if on Windows
-	for (const c of candidates) {
-		try {
-			await runProcess(c, [
-				"/nologo",
-				"/target:exe",
-				`/out:${WINDOWS_HELPER_BINARY}`,
-				WINDOWS_HELPER_SOURCE,
-			]);
-			if (existsSync(WINDOWS_HELPER_BINARY)) return true;
-		} catch {
-			// try next candidate
-		}
-	}
-	return false;
-}
-
-function findPowerShellCommand(): string {
-	// Prefer pwsh (PowerShell 7) if present, otherwise Windows PowerShell
-	// We check filesystem first to avoid spawning during hot path
-	if (existsSync("C:\\Program Files\\PowerShell\\7\\pwsh.exe"))
-		return "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
-	if (existsSync("C:\\Program Files\\PowerShell\\7\\pwsh")) return "pwsh";
-	// Windows PowerShell is inbox in System32
-	if (
-		existsSync("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
-	)
-		return "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
-	return "powershell.exe";
-}
-
-async function ensureWindowsHelper(): Promise<{
-	command: string;
-	args: string[];
-}> {
-	if (!isWindows()) {
-		throw new Error(
-			"Muse-style voice input is currently available only on macOS and Windows",
-		);
-	}
-	if (!existsSync(WINDOWS_HELPER_SOURCE) && !existsSync(WINDOWS_HELPER_PS1)) {
-		throw new Error("The Windows microphone helper sources are incomplete");
-	}
-
-	// If compiled exe exists and is fresh, use it
-	if (existsSync(WINDOWS_HELPER_BINARY) && !windowsHelperNeedsBuild()) {
-		return { command: WINDOWS_HELPER_BINARY, args: [] };
-	}
-
-	// Try to compile exe for better performance
-	if (existsSync(WINDOWS_HELPER_SOURCE)) {
-		if (!windowsHelperNeedsBuild() && existsSync(WINDOWS_HELPER_BINARY)) {
-			return { command: WINDOWS_HELPER_BINARY, args: [] };
-		}
-		const compiled = await tryCompileWindowsHelper();
-		if (compiled && existsSync(WINDOWS_HELPER_BINARY)) {
-			return { command: WINDOWS_HELPER_BINARY, args: [] };
-		}
-	}
-
-	// Fallback to PowerShell script (no compilation needed)
-	if (existsSync(WINDOWS_HELPER_PS1)) {
-		const ps = findPowerShellCommand();
-		return {
-			command: ps,
-			args: [
-				"-NoProfile",
-				"-ExecutionPolicy",
-				"Bypass",
-				"-File",
-				WINDOWS_HELPER_PS1,
-			],
-		};
-	}
-
-	throw new Error(
-		"Windows voice helper could not be prepared — no compiled binary and no PowerShell fallback found",
-	);
-}
-
-async function ensureHelper(): Promise<{ command: string; args: string[] }> {
-	if (isMacOS()) {
-		const bin = await ensureMacOSHelper();
-		return { command: bin, args: [] };
-	}
-	if (isWindows()) {
-		return ensureWindowsHelper();
-	}
-	throw new Error(
-		`Muse-style voice input is currently available only on macOS and Windows (current: ${supportedPlatformLabel()})`,
-	);
 }
 
 class MetaVoiceController {
@@ -620,7 +308,7 @@ class MetaVoiceController {
 		});
 		socket.addEventListener("message", (event) => {
 			if (currentGeneration !== this.generation) return;
-			void this.handleSocketMessage(ctx, event.data);
+			void this.handleSocketMessage(ctx, event.data, currentGeneration);
 		});
 		socket.addEventListener("error", () => {
 			if (currentGeneration !== this.generation) return;
@@ -629,7 +317,11 @@ class MetaVoiceController {
 		socket.addEventListener("close", (event) => {
 			if (currentGeneration !== this.generation || this.phase === "idle")
 				return;
-			if (this.phase === "stopping" && this.transcript) {
+			if (
+				this.phase === "stopping" &&
+				this.transcript &&
+				isNormalSocketClose(event.code)
+			) {
 				this.complete(ctx);
 				return;
 			}
@@ -646,8 +338,10 @@ class MetaVoiceController {
 	private async handleSocketMessage(
 		ctx: ExtensionContext,
 		data: unknown,
+		currentGeneration: number,
 	): Promise<void> {
 		const text = await socketMessageText(data);
+		if (currentGeneration !== this.generation) return;
 		if (text === undefined) return;
 		const payload = parseJsonObject(text);
 		if (!payload) return;

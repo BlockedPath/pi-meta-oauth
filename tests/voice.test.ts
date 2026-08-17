@@ -91,6 +91,8 @@ describe("Meta voice mode", () => {
 
 		for (const requiredPath of [
 			"extensions/voice.ts",
+			"extensions/voice/asr.ts",
+			"extensions/voice/helpers.ts",
 			"extensions/voice/macos-audio.swift",
 			"extensions/voice/Info.plist",
 			"extensions/voice/Entitlements.plist",

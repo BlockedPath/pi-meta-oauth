@@ -286,6 +286,72 @@ describe("Meta media payload rewrite", () => {
 			globalThis.fetch = originalFetch;
 		}
 	});
+
+	test("rewrites media URLs that include query strings", () => {
+		const { rewritten, payload } = rewriteResponsesPayload({
+			input: [
+				{
+					role: "user",
+					content: [
+						{
+							type: "input_image",
+							image_url: "https://cdn.example.com/clip.mp4?token=abc#t=1",
+						},
+					],
+				},
+			],
+		});
+		expect(rewritten).toBe(true);
+		expect(
+			(
+				payload as {
+					input: Array<{ content: Array<Record<string, unknown>> }>;
+				}
+			).input[0].content[0],
+		).toEqual({
+			type: "input_video",
+			video_url: "https://cdn.example.com/clip.mp4?token=abc#t=1",
+		});
+	});
+
+	test("promotes oversized tool-output images and forces store:false", async () => {
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(JSON.stringify({ id: "file-uploaded-image" }), {
+				status: 200,
+			})) as unknown as typeof fetch;
+		try {
+			const result = await maybeUploadLargeInlineBlocks(
+				{
+					store: true,
+					input: [
+						{
+							type: "function_call_output",
+							output: [
+								{
+									type: "input_image",
+									image_url: "data:image/png;base64,AAAA",
+								},
+							],
+						},
+					],
+				},
+				"test-key",
+				1,
+			);
+			expect(result.uploaded).toBe(1);
+			expect(result.payload).toMatchObject({
+				store: false,
+				input: [
+					{
+						output: [{ type: "input_file", file_id: "file-uploaded-image" }],
+					},
+				],
+			});
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 });
 
 

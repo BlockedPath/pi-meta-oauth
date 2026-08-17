@@ -203,9 +203,19 @@ async function postForm<T>(
 	};
 }
 
+function isAbortSignal(value: unknown): value is AbortSignal {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		"aborted" in value &&
+		typeof (value as AbortSignal).aborted === "boolean"
+	);
+}
+
 export async function mintMetaApiKey(
 	identityToken: string,
 	fetchImpl: Fetch = fetch,
+	signal?: AbortSignal,
 ): Promise<string> {
 	const response = await fetchImpl(API_KEY_MINT_URL, {
 		method: "POST",
@@ -216,6 +226,7 @@ export async function mintMetaApiKey(
 			"x-api-version": "1.0.0",
 		},
 		body: "{}",
+		signal,
 	});
 	const body = (await responseBody(response)) as MintResponse &
 		Record<string, unknown>;
@@ -317,15 +328,23 @@ export async function loginMeta(
 
 export async function refreshMetaToken(
 	credentials: OAuthCredentials,
-	fetchImpl: Fetch = fetch,
+	fetchOrSignal: Fetch | AbortSignal = fetch,
 ): Promise<OAuthCredentials> {
 	if (!credentials.refresh)
 		throw new Error(
 			"Meta login is missing its identity token; run /login meta again",
 		);
+	// Pi 0.83 calls refreshToken(credentials). Pi 0.84 passes AbortSignal as
+	// the second argument. Tests inject a fetch mock in that slot.
+	const fetchImpl =
+		typeof fetchOrSignal === "function" ? fetchOrSignal : fetch;
+	const signal = isAbortSignal(fetchOrSignal) ? fetchOrSignal : undefined;
+	if (signal?.aborted) {
+		throw new Error("Meta token refresh was cancelled");
+	}
 	return {
 		...credentials,
-		access: await mintMetaApiKey(credentials.refresh, fetchImpl),
+		access: await mintMetaApiKey(credentials.refresh, fetchImpl, signal),
 		expires: Date.now() + API_KEY_REFRESH_INTERVAL_MS,
 	};
 }
@@ -518,33 +537,49 @@ export async function refreshMetaModels(
 		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
 	}
 
-	const response = await fetchImpl(META_MODEL_CATALOG_URL, {
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${apiKey}`,
-			"x-api-version": "1.0.0",
-		},
-		signal: context.signal,
-	});
-	const body = (await responseBody(response)) as CatalogResponse &
-		Record<string, unknown>;
-	if (!response.ok) {
-		throw new Error(
-			`Meta model catalog failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
-		);
-	}
-	const models = toProviderModels(body);
-	if (!context.signal?.aborted) {
-		try {
-			await persistMetaModels(compatibleContext, {
-				models: modelsForStore(models),
-				checkedAt: Date.now(),
-			});
-		} catch {
-			// Keep the fresh catalog usable even if persistence fails.
+	try {
+		const response = await fetchImpl(META_MODEL_CATALOG_URL, {
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${apiKey}`,
+				"x-api-version": "1.0.0",
+			},
+			signal: context.signal,
+		});
+		const body = (await responseBody(response)) as CatalogResponse &
+			Record<string, unknown>;
+		if (!response.ok) {
+			throw new Error(
+				`Meta model catalog failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
+			);
 		}
+		const models = toProviderModels(body);
+		if (models.length === 0) {
+			const cached = await cachedMetaModels(compatibleContext);
+			return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+		}
+		if (!context.signal?.aborted) {
+			try {
+				await persistMetaModels(compatibleContext, {
+					models: modelsForStore(models),
+					checkedAt: Date.now(),
+				});
+			} catch {
+				// Keep the fresh catalog usable even if persistence fails.
+			}
+		}
+		return models;
+	} catch (error) {
+		if (context.signal?.aborted) throw error;
+		const cached = await cachedMetaModels(compatibleContext);
+		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
 	}
-	return models;
+}
+
+export function metaFallbackCost(
+	modelId: string,
+): MetaProviderModel["cost"] | undefined {
+	return FALLBACK_MODELS.find((model) => model.id === modelId)?.cost;
 }
 
 export function createMetaProviderConfig(): ProviderConfig {

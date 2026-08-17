@@ -101,9 +101,13 @@ export async function prepareMediaOutput(options: {
 	const savedPath = truncated ? await saveFullOutput(identity, text) : undefined;
 	const notes: string[] = [];
 	if (truncated) {
+		const continuation =
+			lines <= 1
+				? `full content saved to: ${savedPath}. Open that file directly; it is a single line so read offset/limit cannot page through it.`
+				: `full content saved to: ${savedPath} (${lines} lines). Use the read tool with offset/limit to continue (offset is a 1-based line number).`;
 		notes.push(
 			savedPath
-				? `content truncated at ${slice.length} of ${text.length} characters; full content saved to: ${savedPath} (${lines} lines). Use the read tool with offset/limit to continue (offset is a 1-based line number).`
+				? `content truncated at ${slice.length} of ${text.length} characters; ${continuation}`
 				: `content truncated at ${slice.length} of ${text.length} characters; the full content could not be saved, so continuation is unavailable.`,
 		);
 	}
