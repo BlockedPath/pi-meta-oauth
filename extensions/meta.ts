@@ -1,4 +1,7 @@
 import type {
+	Api,
+	Model,
+	ModelsStoreEntry,
 	OAuthCredentials,
 	OAuthLoginCallbacks,
 	RefreshModelsContext,
@@ -418,19 +421,102 @@ export function toProviderModels(
 	});
 }
 
+interface CatalogStore {
+	read(): Promise<ModelsStoreEntry | undefined>;
+	write(entry: ModelsStoreEntry): Promise<void>;
+}
+
+interface CompatibleRefreshContext {
+	credential?: RefreshModelsContext["credential"];
+	allowNetwork: boolean;
+	signal?: AbortSignal;
+	// Pi 0.83 catalog persistence API.
+	store?: CatalogStore;
+	// Pi 0.84 generation-checked catalog persistence API.
+	stored?: Readonly<ModelsStoreEntry>;
+	publish?(publication: { persist?: ModelsStoreEntry | null }): Promise<boolean>;
+}
+
+function providerModelsFromStore(
+	entry: Readonly<ModelsStoreEntry> | undefined,
+): MetaProviderModel[] {
+	return (entry?.models ?? []).flatMap((model: Model<Api>) => {
+		if (model.provider !== META_PROVIDER_ID || model.api !== "openai-responses")
+			return [];
+		return [
+			{
+				id: model.id,
+				name: model.name,
+				api: model.api,
+				baseUrl: model.baseUrl,
+				reasoning: model.reasoning,
+				thinkingLevelMap: model.thinkingLevelMap,
+				input: model.input as MetaProviderModel["input"],
+				cost: model.cost,
+				contextWindow: model.contextWindow,
+				maxTokens: model.maxTokens,
+				headers: model.headers,
+				compat: model.compat as MetaProviderModel["compat"],
+			},
+		];
+	});
+}
+
+function modelsForStore(
+	models: MetaProviderModel[],
+): Model<"openai-responses">[] {
+	return models.map((model) => ({
+		...model,
+		api: "openai-responses",
+		provider: META_PROVIDER_ID,
+		baseUrl: model.baseUrl ?? META_API_BASE_URL,
+		input: model.input as Model<"openai-responses">["input"],
+		compat: model.compat as Model<"openai-responses">["compat"],
+	}));
+}
+
+async function cachedMetaModels(
+	context: CompatibleRefreshContext,
+): Promise<MetaProviderModel[]> {
+	try {
+		const stored = context.stored ?? (await context.store?.read());
+		return providerModelsFromStore(stored);
+	} catch {
+		// Catalog persistence is best-effort; bundled fallbacks remain available.
+		return [];
+	}
+}
+
+async function persistMetaModels(
+	context: CompatibleRefreshContext,
+	entry: ModelsStoreEntry,
+): Promise<void> {
+	if (context.publish) {
+		await context.publish({ persist: entry });
+		return;
+	}
+	await context.store?.write(entry);
+}
+
 export async function refreshMetaModels(
 	context: RefreshModelsContext,
 	fetchImpl: Fetch = fetch,
 ): Promise<MetaProviderModel[]> {
-	if (!context.allowNetwork || context.signal?.aborted)
-		return [...FALLBACK_MODELS];
+	const compatibleContext = context as unknown as CompatibleRefreshContext;
+	if (!context.allowNetwork || context.signal?.aborted) {
+		const cached = await cachedMetaModels(compatibleContext);
+		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+	}
 	const apiKey =
 		context.credential?.type === "oauth"
 			? context.credential.access
 			: context.credential?.type === "api_key"
 				? context.credential.key
 				: undefined;
-	if (!apiKey) return [...FALLBACK_MODELS];
+	if (!apiKey) {
+		const cached = await cachedMetaModels(compatibleContext);
+		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+	}
 
 	const response = await fetchImpl(META_MODEL_CATALOG_URL, {
 		headers: {
@@ -447,7 +533,18 @@ export async function refreshMetaModels(
 			`Meta model catalog failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
 		);
 	}
-	return toProviderModels(body);
+	const models = toProviderModels(body);
+	if (!context.signal?.aborted) {
+		try {
+			await persistMetaModels(compatibleContext, {
+				models: modelsForStore(models),
+				checkedAt: Date.now(),
+			});
+		} catch {
+			// Keep the fresh catalog usable even if persistence fails.
+		}
+	}
+	return models;
 }
 
 export function createMetaProviderConfig(): ProviderConfig {

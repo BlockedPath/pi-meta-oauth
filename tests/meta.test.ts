@@ -1,10 +1,17 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
+import type {
+	ModelsStoreEntry,
+	RefreshModelsContext,
+} from "@earendil-works/pi-ai";
 import {
 	createMetaProviderConfig,
 	loginMeta,
+	META_API_BASE_URL,
 	META_MODEL_CATALOG_URL,
+	META_PROVIDER_ID,
 	mintMetaApiKey,
+	refreshMetaModels,
 	toProviderModels,
 } from "../extensions/meta.ts";
 
@@ -160,6 +167,157 @@ describe("Meta OAuth provider", () => {
 		for (const id of LIVE_CATALOG_SNAPSHOT_2026_08_10) {
 			expect(fallbackIDs.has(id)).toBe(true);
 		}
+	});
+
+	test("persists fetched models with complete provider metadata", async () => {
+		let persisted: ModelsStoreEntry | undefined;
+		const context = {
+			credential: { type: "api_key", key: "model-api-key" },
+			store: {
+				read: async () => persisted,
+				write: async (entry: ModelsStoreEntry) => {
+					persisted = entry;
+				},
+				delete: async () => {
+					persisted = undefined;
+				},
+			},
+			allowNetwork: true,
+			signal: new AbortController().signal,
+		} satisfies RefreshModelsContext;
+		const before = Date.now();
+		const models = await refreshMetaModels(context, (async () =>
+			jsonResponse({
+				data: [{ id: "muse-spark-1.2" }],
+			})) as unknown as typeof fetch);
+
+		expect(models).toHaveLength(1);
+		expect(persisted?.checkedAt).toBeGreaterThanOrEqual(before);
+		expect(persisted?.models).toHaveLength(1);
+		expect(persisted?.models[0]).toMatchObject({
+			id: "muse-spark-1.2",
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+			baseUrl: META_API_BASE_URL,
+			contextWindow: 1_048_576,
+		});
+	});
+
+	test("restores persisted models when network refresh is unavailable", async () => {
+		const fallback = (createMetaProviderConfig().models ?? [])[0];
+		if (!fallback) throw new Error("Meta fallback model is required");
+		let fetchCalled = false;
+		const context = {
+			credential: { type: "api_key", key: "model-api-key" },
+			store: {
+				read: async () => ({
+					models: [
+						{
+							...fallback,
+							provider: META_PROVIDER_ID,
+							api: "openai-responses" as const,
+							baseUrl: META_API_BASE_URL,
+						},
+					],
+					checkedAt: Date.now(),
+				}),
+				write: async () => {},
+				delete: async () => {},
+			},
+			allowNetwork: false,
+			signal: new AbortController().signal,
+		} satisfies RefreshModelsContext;
+		const models = await refreshMetaModels(context, (async () => {
+			fetchCalled = true;
+			throw new Error("network should not be used");
+		}) as unknown as typeof fetch);
+
+		expect(fetchCalled).toBe(false);
+		expect(models).toHaveLength(1);
+		expect(models[0]).toMatchObject({
+			id: fallback.id,
+			api: "openai-responses",
+			baseUrl: META_API_BASE_URL,
+			contextWindow: fallback.contextWindow,
+		});
+		expect("provider" in models[0]).toBe(false);
+	});
+
+	// Pi 0.84 replaced the 0.83 `store` read/write pair with an immutable
+	// `stored` snapshot plus generation-checked `publish`. The package supports
+	// both, so both refresh-context shapes need coverage.
+	test("publishes fetched models through the Pi 0.84 refresh context", async () => {
+		const published: Array<{ persist?: ModelsStoreEntry | null }> = [];
+		const context = {
+			credential: { type: "api_key", key: "model-api-key" },
+			publish: async (publication: { persist?: ModelsStoreEntry | null }) => {
+				published.push(publication);
+				return true;
+			},
+			allowNetwork: true,
+			signal: new AbortController().signal,
+		} as unknown as RefreshModelsContext;
+		const before = Date.now();
+		const models = await refreshMetaModels(context, (async () =>
+			jsonResponse({
+				data: [{ id: "muse-spark-1.2" }],
+			})) as unknown as typeof fetch);
+
+		expect("store" in context).toBe(false);
+		expect(models).toHaveLength(1);
+		expect(published).toHaveLength(1);
+		expect(published[0]?.persist?.checkedAt).toBeGreaterThanOrEqual(before);
+		expect(published[0]?.persist?.models).toHaveLength(1);
+		expect(published[0]?.persist?.models[0]).toMatchObject({
+			id: "muse-spark-1.2",
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+			baseUrl: META_API_BASE_URL,
+			contextWindow: 1_048_576,
+		});
+	});
+
+	test("restores the Pi 0.84 stored snapshot without network access", async () => {
+		const fallback = (createMetaProviderConfig().models ?? [])[0];
+		if (!fallback) throw new Error("Meta fallback model is required");
+		let fetchCalled = false;
+		let publishCalled = false;
+		const context = {
+			credential: { type: "api_key", key: "model-api-key" },
+			stored: {
+				models: [
+					{
+						...fallback,
+						provider: META_PROVIDER_ID,
+						api: "openai-responses" as const,
+						baseUrl: META_API_BASE_URL,
+					},
+				],
+				checkedAt: Date.now(),
+			},
+			publish: async () => {
+				publishCalled = true;
+				return true;
+			},
+			allowNetwork: false,
+			signal: new AbortController().signal,
+		} as unknown as RefreshModelsContext;
+		const models = await refreshMetaModels(context, (async () => {
+			fetchCalled = true;
+			throw new Error("network should not be used");
+		}) as unknown as typeof fetch);
+
+		expect("store" in context).toBe(false);
+		expect(fetchCalled).toBe(false);
+		expect(publishCalled).toBe(false);
+		expect(models).toHaveLength(1);
+		expect(models[0]).toMatchObject({
+			id: fallback.id,
+			api: "openai-responses",
+			baseUrl: META_API_BASE_URL,
+			contextWindow: fallback.contextWindow,
+		});
+		expect("provider" in models[0]).toBe(false);
 	});
 
 	liveCatalogTest("live catalog IDs have bundled fallbacks", async () => {

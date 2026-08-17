@@ -61,10 +61,10 @@ Audio is captured only between the two Alt+V presses and streamed as 16 kHz mono
 
 **Windows:** uses `winmm.dll` `waveIn*` via a C# helper. On first run pi tries to compile `extensions/voice/windows-audio.cs` with `csc.exe` (in-box .NET Framework) to `~/.pi/agent/bin/pi-meta-oauth-voice-v1.exe` for best performance. If no compiler is found it falls back to `extensions/voice/windows-audio.ps1` executed with `powershell.exe -ExecutionPolicy Bypass` (PowerShell 5.1 inbox, or `pwsh` 7 if present) which compiles the same capture code at runtime via `Add-Type`. No extra install is required. If recording fails, check **Settings → Privacy & security → Microphone** that access is allowed for desktop apps.
 
-Optional overrides:
+Optional overrides (the `PI_META_*` name takes precedence):
 
-- `PI_META_VOICE_ASR_ENDPOINT`
-- `PI_META_VOICE_ASR_MODEL`
+- `PI_META_VOICE_ASR_ENDPOINT` (legacy alias: `MUSE_VOICE_ASR_ENDPOINT`)
+- `PI_META_VOICE_ASR_MODEL` (legacy alias: `MUSE_VOICE_ASR_MODEL`)
 
 ## Media tools
 
@@ -91,6 +91,8 @@ Fallback models use a 1,048,576-token context window, up to 256K output tokens, 
 | `muse-spark-1.2-contributor` | 0.10 / 0.20 / 0.002 |
 | `muse-spark-1.1` | 1.25 / 4.25 / 0.15 |
 
+> **Contributor-model privacy:** the discounted contributor model allows Meta to use prompts and completions for product improvement, including training future Meta models. Use the standard `muse-spark-1.2` model if you do not want the contributor terms. See [Meta's model documentation](https://dev.meta.ai/docs/models).
+
 To scope Pi's model picker to Meta models:
 
 ```json
@@ -99,39 +101,22 @@ To scope Pi's model picker to Meta models:
 
 ### Making context windows visible to external tools
 
-Pi knows the Meta context window at runtime, but it does **not** persist
-catalogs for extension-registered providers to `~/.pi/agent/models-store.json`.
-Anything reading Pi's session data from outside the process therefore sees no
-window for `meta` models and can only show an absolute token count.
+After a successful network model refresh, the extension persists the Meta
+catalog to `~/.pi/agent/models-store.json`. External usage tools such as
+[herdr-agent-usage](https://github.com/senna-lang/herdr-agent-usage) can then
+show a percentage (for example, `⛁ 2% (24k)`) instead of only an absolute token
+count. Pi writes the cache during interactive or RPC startup, and again after
+`/login meta`. `pi --list-models meta` lists currently available models but does
+not itself trigger a network catalog refresh. The cached catalog is also used
+when Pi starts without network access.
 
-This affects usage tooling such as
-[herdr-agent-usage](https://github.com/senna-lang/herdr-agent-usage), whose
-sidebar shows `⛁ 24k` instead of `⛁ 2% (24k)` for Muse panes.
-
-To publish the window, add an override to `~/.pi/agent/models.json`:
-
-```json
-{
-  "providers": {
-    "meta": {
-      "modelOverrides": {
-        "muse-spark-1.2": { "contextWindow": 1007997 },
-        "muse-spark-1.2-contributor": { "contextWindow": 1007997 }
-      }
-    }
-  }
-}
-```
-
-`1,007,997` is the effective limit reported for those two models by a cached
-Muse Code 0.1.0/R708.1 catalog snapshot observed on 2026-08-06. That snapshot
-did not include `muse-spark-1.1`, so no effective-limit override is claimed for
-1.1 here. The bundled fallback in `extensions/meta.ts` uses the nominal
-`1048576`; use the lower value only when you want percentages to match that
-specific Muse snapshot.
-
-This only adds metadata — the provider itself is still registered by the
-extension, and `pi --list-models meta` is unchanged.
+The bundled fallback uses Meta's nominal `1,048,576`-token context window. A
+cached Muse Code 0.1.0/R708.1 catalog observed on 2026-08-06 reported a lower
+effective limit of `1,007,997` for `muse-spark-1.2` and
+`muse-spark-1.2-contributor`. If you need percentages to match that specific
+Muse snapshot, you can still set `contextWindow: 1007997` for those models in
+`~/.pi/agent/models.json`; model overrides take precedence over the persisted
+catalog.
 
 ## Verify
 
