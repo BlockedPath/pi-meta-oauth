@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
 	asrEndpoint,
+	asrHandshake,
 	formatAuthorization,
 	pcmAudioLevel,
 } from "../extensions/voice.ts";
@@ -26,6 +27,15 @@ describe("Meta voice mode", () => {
 	test("formats the Meta ASR authorization value exactly once", () => {
 		expect(formatAuthorization("LLM|example")).toBe("OAuth LLM|example");
 		expect(formatAuthorization("OAuth LLM|example")).toBe("OAuth LLM|example");
+	});
+
+	test("handshake is Muse duplex ASR, not Bearer chat", () => {
+		expect(asrHandshake("LLM|example")).toEqual({
+			mode: "DEFAULT",
+			authorization: { accessToken: "OAuth LLM|example" },
+			audioEncoding: "PCM_16KHZ",
+			model: "prod_tbh",
+		});
 	});
 
 	test("builds a secure ASR URL with a session id", () => {
@@ -84,9 +94,7 @@ describe("Meta voice mode", () => {
 		const files =
 			(packResult as { files?: Array<{ path?: unknown }> }).files ?? [];
 		const paths = new Set(
-			files.flatMap((file) =>
-				typeof file.path === "string" ? [file.path] : [],
-			),
+			files.flatMap((file) => (typeof file.path === "string" ? [file.path] : [])),
 		);
 
 		for (const requiredPath of [

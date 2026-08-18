@@ -1,5 +1,9 @@
 import type { Usage } from "@earendil-works/pi-ai";
-import { META_API_BASE_URL, metaFallbackCost } from "../meta.ts";
+import {
+	applyMetaResponsesCacheHints,
+	META_API_BASE_URL,
+	metaFallbackCost,
+} from "../meta.ts";
 
 function record(value: unknown): Record<string, unknown> | undefined {
 	return value !== null && typeof value === "object"
@@ -20,7 +24,11 @@ function tokenCount(...values: unknown[]): number | undefined {
 	return undefined;
 }
 
-function responsesErrorDetail(json: unknown, text: string, statusText: string): string {
+function responsesErrorDetail(
+	json: unknown,
+	text: string,
+	statusText: string,
+): string {
 	const body = record(json);
 	if (body?.error !== undefined) {
 		return JSON.stringify(body.error).slice(0, 1000);
@@ -77,10 +85,8 @@ export function extractMetaResponseUsage(
 	const outputTokens = output ?? 0;
 	const reasoning = Math.min(
 		outputTokens,
-		tokenCount(
-			outputDetails?.reasoning_tokens,
-			outputDetails?.reasoningTokens,
-		) ?? 0,
+		tokenCount(outputDetails?.reasoning_tokens, outputDetails?.reasoningTokens) ??
+			0,
 	);
 	const totalTokens =
 		tokenCount(usage.total_tokens, usage.totalTokens) ??
@@ -127,8 +133,7 @@ export function extractResponsesText(json: unknown): string {
 	if (Array.isArray(output)) {
 		const texts: string[] = [];
 		for (const item of output as Record<string, unknown>[]) {
-			if (!item || typeof item !== "object" || item.type !== "message")
-				continue;
+			if (!item || typeof item !== "object" || item.type !== "message") continue;
 			if (typeof item.content === "string" && item.content.trim())
 				texts.push(item.content);
 			if (Array.isArray(item.content)) {
@@ -160,6 +165,7 @@ export async function callMetaResponses(
 	signal?: AbortSignal,
 ): Promise<{ text: string; raw: unknown }> {
 	payload.store = false;
+	applyMetaResponsesCacheHints(payload);
 	const res = await fetch(`${META_API_BASE_URL}/responses`, {
 		method: "POST",
 		headers: {

@@ -8,7 +8,8 @@
 
 Meta Model API OAuth and Muse-style voice input for [pi](https://pi.dev).
 
-- Use Muse Spark models through Pi's `openai-responses` provider
+- Use Muse Spark models through Pi's `openai-responses` provider (not `/chat/completions` — Muse prompt cache is ~0% there)
+- Send `prompt_cache_retention: "24h"` on Meta Responses requests unless the payload already set a retention
 - Device authorization against `https://auth.meta.com`
 - Model API-key minting through `POST https://api.meta.ai/muse-code/key`
 - Dynamic Muse model catalog from `GET https://api.meta.ai/v1/models`

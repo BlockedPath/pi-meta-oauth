@@ -336,8 +336,7 @@ export async function refreshMetaToken(
 		);
 	// Pi 0.83 calls refreshToken(credentials). Pi 0.84 passes AbortSignal as
 	// the second argument. Tests inject a fetch mock in that slot.
-	const fetchImpl =
-		typeof fetchOrSignal === "function" ? fetchOrSignal : fetch;
+	const fetchImpl = typeof fetchOrSignal === "function" ? fetchOrSignal : fetch;
 	const signal = isAbortSignal(fetchOrSignal) ? fetchOrSignal : undefined;
 	if (signal?.aborted) {
 		throw new Error("Meta token refresh was cancelled");
@@ -582,6 +581,38 @@ export function metaFallbackCost(
 	return FALLBACK_MODELS.find((model) => model.id === modelId)?.cost;
 }
 
+/** Meta prompt-cache opt-in. Measured 0% hits on /chat/completions vs 93–99% on /responses with 24h. */
+export const META_PROMPT_CACHE_RETENTION = "24h";
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+/**
+ * Hermes-equivalent Responses hints for api.meta.ai:
+ * setdefault `prompt_cache_retention: 24h`, and drop `reasoning.effort: none`
+ * because Meta 400s on it.
+ */
+export function applyMetaResponsesCacheHints(payload: unknown): unknown {
+	const body = asRecord(payload);
+	if (!body) return payload;
+	if (body.prompt_cache_retention === undefined) {
+		body.prompt_cache_retention = META_PROMPT_CACHE_RETENTION;
+	}
+	const reasoning = asRecord(body.reasoning);
+	if (
+		reasoning &&
+		(reasoning.effort === "none" ||
+			reasoning.effort === undefined ||
+			reasoning.effort === null)
+	) {
+		delete body.reasoning;
+	}
+	return body;
+}
+
 export function createMetaProviderConfig(): ProviderConfig {
 	return {
 		name: "Meta Model API",
@@ -614,4 +645,8 @@ export default function metaOAuthProvider(pi: ExtensionAPI): void {
 		process.env["MODEL_API_KEY"] = process.env[META_ENV_VAR];
 	}
 	pi.registerProvider(META_PROVIDER_ID, createMetaProviderConfig());
+	pi.on("before_provider_request", (event, ctx) => {
+		if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
+		return applyMetaResponsesCacheHints(event.payload);
+	});
 }

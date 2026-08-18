@@ -53,6 +53,28 @@ export function formatAuthorization(apiKey: string): string {
 	return apiKey.startsWith("OAuth ") ? apiKey : `OAuth ${apiKey}`;
 }
 
+export function asrModel(): string {
+	return (
+		process.env.PI_META_VOICE_ASR_MODEL ??
+		process.env.MUSE_VOICE_ASR_MODEL ??
+		DEFAULT_ASR_MODEL
+	);
+}
+
+export function asrHandshake(apiKey: string): {
+	mode: "DEFAULT";
+	authorization: { accessToken: string };
+	audioEncoding: "PCM_16KHZ";
+	model: string;
+} {
+	return {
+		mode: "DEFAULT",
+		authorization: { accessToken: formatAuthorization(apiKey) },
+		audioEncoding: "PCM_16KHZ",
+		model: asrModel(),
+	};
+}
+
 export function asrEndpoint(sessionId: string): string {
 	const configured =
 		process.env.PI_META_VOICE_ASR_ENDPOINT ??
@@ -90,7 +112,9 @@ export async function socketMessageText(
 	return undefined;
 }
 
-export function parseJsonObject(text: string): Record<string, unknown> | undefined {
+export function parseJsonObject(
+	text: string,
+): Record<string, unknown> | undefined {
 	try {
 		const value = JSON.parse(text) as unknown;
 		if (value && typeof value === "object" && !Array.isArray(value)) {

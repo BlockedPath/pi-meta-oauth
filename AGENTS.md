@@ -1,5 +1,18 @@
 # pi-meta-oauth — maintainer notes
 
+## Prompt cache lives on `/v1/responses` with an explicit 24h retention hint
+
+Muse Spark on `api.meta.ai` returns **0 cached tokens** on `/v1/chat/completions` even with identical prefixes and the retention hint. `/v1/responses` with `prompt_cache_retention: "24h"` is the surface that actually caches (measured 93–99% on agentic workloads; contributor tier is $0.10/M input vs $0.002/M cached).
+
+Pi-ai defaults `cacheRetention` to `"short"`, which **omits** the retention field even when `supportsLongCacheRetention` is true. Do not assume the default is 24h. We setdefault it in two places:
+
+- `applyMetaResponsesCacheHints()` from the `before_provider_request` hook in `extensions/meta.ts`
+- `callMetaResponses()` in `extensions/media/responses.ts` for direct media/tool calls
+
+An explicit `prompt_cache_retention` already on the payload wins. The same helper deletes `reasoning` when `effort` is `"none"` / missing — Meta 400s on `reasoning: { effort: "none" }`. Fallback `thinkingLevelMap.off` is `null` so the common path never emits that key; the strip is defense in depth.
+
+Hermetic contracts live in `tests/meta-cache.test.ts`. They capture the pi-ai Responses payload via a mock `fetch` and do **not** hit the live endpoint. A green `bun test` does not prove cache hits still happen in production.
+
 ## The Meta ASR endpoint is undocumented, unversioned, and can break without warning
 
 Voice input (`extensions/voice.ts`) streams audio to an internal Meta endpoint

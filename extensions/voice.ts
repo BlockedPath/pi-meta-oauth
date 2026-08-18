@@ -11,9 +11,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
 	asrEndpoint,
+	asrHandshake,
 	chooseTranscript,
-	DEFAULT_ASR_MODEL,
-	formatAuthorization,
 	isNormalSocketClose,
 	parseJsonObject,
 	pcmAudioLevel,
@@ -25,7 +24,12 @@ import {
 	supportedPlatformLabel,
 } from "./voice/helpers.ts";
 
-export { asrEndpoint, formatAuthorization, pcmAudioLevel } from "./voice/asr.ts";
+export {
+	asrEndpoint,
+	asrHandshake,
+	formatAuthorization,
+	pcmAudioLevel,
+} from "./voice/asr.ts";
 
 const AGENT_DIR = join(homedir(), ".pi/agent");
 const SETTINGS_FILE = join(AGENT_DIR, "pi-meta-oauth-voice.json");
@@ -253,10 +257,7 @@ class MetaVoiceController {
 				this.audioLevel *= 0.78;
 			}, 120);
 			this.recordingLimitTimer = setTimeout(() => {
-				ctx.ui.notify(
-					"Voice recording reached the two-minute limit",
-					"warning",
-				);
+				ctx.ui.notify("Voice recording reached the two-minute limit", "warning");
 				this.stop(ctx);
 			}, MAX_RECORDING_MS);
 		} catch (error) {
@@ -294,17 +295,7 @@ class MetaVoiceController {
 		this.socket = socket;
 		socket.addEventListener("open", () => {
 			if (currentGeneration !== this.generation) return;
-			socket.send(
-				JSON.stringify({
-					mode: "DEFAULT",
-					authorization: { accessToken: formatAuthorization(apiKey) },
-					audioEncoding: "PCM_16KHZ",
-					model:
-						process.env.PI_META_VOICE_ASR_MODEL ??
-						process.env.MUSE_VOICE_ASR_MODEL ??
-						DEFAULT_ASR_MODEL,
-				}),
-			);
+			socket.send(JSON.stringify(asrHandshake(apiKey)));
 		});
 		socket.addEventListener("message", (event) => {
 			if (currentGeneration !== this.generation) return;
@@ -315,8 +306,7 @@ class MetaVoiceController {
 			this.fail(ctx, new Error("could not connect to Muse's Meta ASR service"));
 		});
 		socket.addEventListener("close", (event) => {
-			if (currentGeneration !== this.generation || this.phase === "idle")
-				return;
+			if (currentGeneration !== this.generation || this.phase === "idle") return;
 			if (
 				this.phase === "stopping" &&
 				this.transcript &&
@@ -328,8 +318,7 @@ class MetaVoiceController {
 			this.fail(
 				ctx,
 				new Error(
-					event.reason ||
-						`Meta ASR connection closed (${event.code || "unknown"})`,
+					event.reason || `Meta ASR connection closed (${event.code || "unknown"})`,
 				),
 			);
 		});
@@ -593,9 +582,7 @@ class MetaVoiceController {
 		this.generation += 1;
 		this.clearTimers();
 		this.closeResources();
-		ctx.ui.setEditorText(
-			combineEditorText(this.originalEditorText, transcript),
-		);
+		ctx.ui.setEditorText(combineEditorText(this.originalEditorText, transcript));
 		ctx.ui.setWidget("muse-voice", undefined);
 		this.renderIdleStatus(ctx);
 		if (transcript) {
