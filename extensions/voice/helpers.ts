@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
+	readFileSync,
 	renameSync,
 	statSync,
 	unlinkSync,
@@ -19,6 +20,7 @@ const HELPER_BINARY = join(AGENT_DIR, "bin/pi-meta-oauth-voice-v1");
 const WINDOWS_HELPER_SOURCE = join(HELPER_DIR, "windows-audio.cs");
 const WINDOWS_HELPER_PS1 = join(HELPER_DIR, "windows-audio.ps1");
 const WINDOWS_HELPER_BINARY = join(AGENT_DIR, "bin/pi-meta-oauth-voice-v1.exe");
+const LINUX_HELPER_SCRIPT = join(HELPER_DIR, "linux-audio.sh");
 
 export function isMacOS(): boolean {
 	return platform() === "darwin";
@@ -28,13 +30,30 @@ export function isWindows(): boolean {
 	return platform() === "win32";
 }
 
+export function isLinux(): boolean {
+	return platform() === "linux";
+}
+
+export function isWSL(): boolean {
+	if (!isLinux()) return false;
+	try {
+		return readFileSync("/proc/version", "utf8")
+			.toLowerCase()
+			.includes("microsoft");
+	} catch {
+		return false;
+	}
+}
+
 export function isSupportedPlatform(): boolean {
-	return isMacOS() || isWindows();
+	return isMacOS() || isWindows() || isLinux();
 }
 
 export function supportedPlatformLabel(): string {
 	if (isMacOS()) return "macOS";
 	if (isWindows()) return "Windows";
+	if (isWSL()) return "WSL (Linux)";
+	if (isLinux()) return "Linux";
 	return `${platform()}`;
 }
 
@@ -226,6 +245,18 @@ async function ensureWindowsHelper(): Promise<{
 	);
 }
 
+function ensureLinuxHelper(): { command: string; args: string[] } {
+	if (!isLinux()) {
+		throw new Error(
+			"Muse-style voice input is currently available only on macOS, Windows, and Linux",
+		);
+	}
+	if (!existsSync(LINUX_HELPER_SCRIPT)) {
+		throw new Error("The Linux microphone helper script is missing");
+	}
+	return { command: "/bin/bash", args: [LINUX_HELPER_SCRIPT] };
+}
+
 export async function ensureHelper(): Promise<{
 	command: string;
 	args: string[];
@@ -237,7 +268,10 @@ export async function ensureHelper(): Promise<{
 	if (isWindows()) {
 		return ensureWindowsHelper();
 	}
+	if (isLinux()) {
+		return ensureLinuxHelper();
+	}
 	throw new Error(
-		`Muse-style voice input is currently available only on macOS and Windows (current: ${supportedPlatformLabel()})`,
+		`Muse-style voice input is currently available only on macOS, Windows, and Linux (current: ${supportedPlatformLabel()})`,
 	);
 }

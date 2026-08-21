@@ -13,7 +13,7 @@ Meta Model API OAuth and Muse-style voice input for [pi](https://pi.dev).
 - Device authorization against `https://auth.meta.com`
 - Model API-key minting through `POST https://api.meta.ai/muse-code/key`
 - Dynamic Muse model catalog from `GET https://api.meta.ai/v1/models`
-- Toggle-based Meta voice dictation on macOS and Windows with a live green input meter
+- Toggle-based Meta voice dictation on macOS, Windows, and Linux/WSL with a live green input meter
 
 ## Install
 
@@ -43,7 +43,7 @@ The access key is re-minted daily.
 
 ## Voice input
 
-Voice mode runs on **macOS and Windows** (Linux is not yet supported). It uses the same Meta credential managed by this provider; a separate Muse login is not required.
+Voice mode runs on **macOS, Windows, and Linux**, including WSL2 through WSLg. It uses the same Meta credential managed by this provider; a separate Muse login is not required.
 
 1. Press **Alt+V** once to start recording.
 2. Speak while the green microphone meter is visible in Pi's status bar.
@@ -61,6 +61,8 @@ Audio is captured only between the two Alt+V presses and streamed as 16 kHz mono
 **macOS:** uses `AVFoundation` via a Swift helper compiled with `xcrun swiftc` (first recording triggers the system microphone permission prompt).
 
 **Windows:** uses `winmm.dll` `waveIn*` via a C# helper. On first run pi tries to compile `extensions/voice/windows-audio.cs` with `csc.exe` (in-box .NET Framework) to `~/.pi/agent/bin/pi-meta-oauth-voice-v1.exe` for best performance. If no compiler is found it falls back to `extensions/voice/windows-audio.ps1` executed with `powershell.exe -ExecutionPolicy Bypass` (PowerShell 5.1 inbox, or `pwsh` 7 if present) which compiles the same capture code at runtime via `Add-Type`. No extra install is required. If recording fails, check **Settings → Privacy & security → Microphone** that access is allowed for desktop apps.
+
+**Linux/WSL:** uses `parec` from `pulseaudio-utils`, with `arecord` from `alsa-utils` as a fallback. The helper inherits `PULSE_SERVER`. For WSLg, configure `PULSE_SERVER=unix:/mnt/wslg/PulseServer`; the default source should appear as `RDPSource` in `pactl info`. An ALSA default configured with `type pulse` also works with the `arecord` fallback.
 
 Optional overrides (the `PI_META_*` name takes precedence):
 
