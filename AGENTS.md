@@ -11,7 +11,15 @@ Pi-ai defaults `cacheRetention` to `"short"`, which **omits** the retention fiel
 
 An explicit `prompt_cache_retention` already on the payload wins. The same helper deletes `reasoning` when `effort` is `"none"` / missing — Meta 400s on `reasoning: { effort: "none" }`. Fallback `thinkingLevelMap.off` is `null` so the common path never emits that key; the strip is defense in depth.
 
-Hermetic contracts live in `tests/meta-cache.test.ts`. They capture the pi-ai Responses payload via a mock `fetch` and do **not** hit the live endpoint. A green `bun test` does not prove cache hits still happen in production.
+Hermetic wire-contract tests live at the top of `tests/meta-cache.test.ts`. They capture the pi-ai Responses payload via a mock `fetch` and do **not** hit the live endpoint. A green `bun test` does not prove cache hits still happen in production.
+
+To measure production hits (Hermes's `cache=17009/17344 (98%)` bar):
+
+```bash
+bun test tests/meta-cache.test.ts
+```
+
+The probe resolves a key from `PI_META_LIVE_API_KEY` / `META_API_KEY` / `MODEL_API_KEY`, then `~/.pi/agent/auth.json` `meta.access` (the Model API key minted by `/login meta`; skipped if that token's `expires` is past). OAuth is enough. It POSTs the same ~4k-token prefix via `callMetaResponses` twice, plus one retry after 2s if the second call misses cache (so up to three POSTs), and asserts `cached_tokens > 0`. It makes real billable API calls whenever a credential resolves — including plain `bun test` on a logged-in machine. Skipped when no valid credential is available. Do not put a live key in CI.
 
 ## The Meta ASR endpoint is undocumented, unversioned, and can break without warning
 

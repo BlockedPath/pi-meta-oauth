@@ -128,6 +128,14 @@ bun run typecheck
 bun test
 ```
 
+`bun test` is hermetic unless a Meta credential is already available. The live cache-hit probe makes real billable API calls when a credential resolves: two identical `/v1/responses` calls (asserting `cached_tokens` on the second), plus one 2s retry if that second call misses cache. The credential is resolved, in order, from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or the minted key from `~/.pi/agent/auth.json` after `/login meta` (skipped if expired). OAuth is enough — you do not need a separate key. Skipped when no valid credential exists (CI):
+
+```bash
+bun test tests/meta-cache.test.ts
+# or, if you are not logged in:
+PI_META_LIVE_API_KEY='LLM|...' bun test tests/meta-cache.test.ts
+```
+
 ## Publish to npm and pi.dev
 
 The `pi-package` keyword makes the package discoverable at <https://pi.dev/packages>. Publishing is handled by `.github/workflows/publish.yml` when a `v*` tag is pushed. Each release publishes the canonical `pi-meta-oauth` package to npm and a scoped `@blockedpath/pi-meta-oauth` mirror to GitHub Packages.

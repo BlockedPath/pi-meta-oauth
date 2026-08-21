@@ -12,7 +12,47 @@ import {
 	toProviderModels,
 } from "../extensions/meta.ts";
 import metaOAuthProvider from "../extensions/meta.ts";
-import { callMetaResponses } from "../extensions/media/responses.ts";
+import {
+	callMetaResponses,
+	extractMetaResponseUsage,
+} from "../extensions/media/responses.ts";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const LIVE_CACHE_MODEL = "muse-spark-1.2-contributor";
+const LIVE_CACHE_KEY = "pi-meta-oauth-live-cache-probe-v1";
+
+function resolveLiveMetaApiKey(): string | undefined {
+	for (const value of [
+		process.env.PI_META_LIVE_API_KEY,
+		process.env.META_API_KEY,
+		process.env.MODEL_API_KEY,
+	]) {
+		if (typeof value === "string" && value.trim()) return value.trim();
+	}
+	try {
+		const auth = JSON.parse(
+			readFileSync(join(homedir(), ".pi/agent/auth.json"), "utf8"),
+		) as { meta?: { access?: unknown; expires?: unknown } };
+		// auth.meta.expires is epoch milliseconds; an expired token must not turn
+		// every test run into a hard 401 — treat it as no credential.
+		if (
+			typeof auth.meta?.expires === "number" &&
+			auth.meta.expires <= Date.now()
+		) {
+			return undefined;
+		}
+		return typeof auth.meta?.access === "string" && auth.meta.access.trim()
+			? auth.meta.access.trim()
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+const liveApiKey = resolveLiveMetaApiKey();
+const liveCacheTest = liveApiKey ? test : test.skip;
 
 function fallbackModels() {
 	const models = createMetaProviderConfig().models ?? [];
@@ -281,4 +321,76 @@ describe("Meta Responses cache and reasoning contracts", () => {
 			prompt_cache_retention: "24h",
 		});
 	});
+});
+
+function liveCachePrefix(): string {
+	const lines: string[] = [
+		"This block is a fixed Muse prompt-cache probe. Keep it byte-identical.",
+	];
+	let n = 0;
+	while (lines.join("\n").length < 16_000) {
+		n += 1;
+		lines.push(
+			`${n}. Identical prefix line for prompt-cache measurement across two calls.`,
+		);
+	}
+	return lines.join("\n");
+}
+
+function liveCachePayload(): Record<string, unknown> {
+	return {
+		model: LIVE_CACHE_MODEL,
+		prompt_cache_key: LIVE_CACHE_KEY,
+		max_output_tokens: 16,
+		input: [
+			{
+				type: "message",
+				role: "user",
+				content: [
+					{
+						type: "input_text",
+						text: `${liveCachePrefix()}\n\nReply with the single word pong.`,
+					},
+				],
+			},
+		],
+	};
+}
+
+function usageSummary(raw: unknown): string {
+	const usage = extractMetaResponseUsage(raw, LIVE_CACHE_MODEL);
+	if (!usage) {
+		return `no usage in ${JSON.stringify(raw).slice(0, 500)}`;
+	}
+	const billed = usage.input + usage.cacheRead + usage.cacheWrite;
+	const pct = billed > 0 ? Math.round((usage.cacheRead / billed) * 100) : 0;
+	return `cache=${usage.cacheRead}/${billed} (${pct}%) input=${usage.input} output=${usage.output}`;
+}
+
+describe("Meta live prompt-cache probe", () => {
+	liveCacheTest(
+		"second identical Responses call reports cached tokens",
+		async () => {
+			if (!liveApiKey) throw new Error("PI_META_LIVE_API_KEY is required");
+			const payload = liveCachePayload();
+			const first = await callMetaResponses(liveApiKey, { ...payload });
+			let second = await callMetaResponses(liveApiKey, { ...payload });
+			let secondUsage = extractMetaResponseUsage(second.raw, LIVE_CACHE_MODEL);
+			if (!secondUsage?.cacheRead) {
+				await Bun.sleep(2_000);
+				second = await callMetaResponses(liveApiKey, { ...payload });
+				secondUsage = extractMetaResponseUsage(second.raw, LIVE_CACHE_MODEL);
+			}
+			const billed =
+				(secondUsage?.input ?? 0) +
+				(secondUsage?.cacheRead ?? 0) +
+				(secondUsage?.cacheWrite ?? 0);
+			expect(billed, `first ${usageSummary(first.raw)}`).toBeGreaterThan(1_000);
+			expect(
+				secondUsage?.cacheRead,
+				`first ${usageSummary(first.raw)}; second ${usageSummary(second.raw)}`,
+			).toBeGreaterThan(0);
+		},
+		120_000,
+	);
 });
