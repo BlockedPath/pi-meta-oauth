@@ -70,11 +70,14 @@ macOS helper resources ship — they do **not** hit the live endpoint, so a gree
 
 ## Platform
 
-Voice runs on **macOS and Windows** (Linux not yet supported). Two helpers are shipped and must
+Voice runs on **macOS, Windows, and Linux**, including WSL2 through WSLg. Three helpers are shipped and must
 stay in the published tarball — `package.json` `files` includes `extensions/` and tests assert
 they are present:
 
 - macOS: Swift helper (`extensions/voice/macos-audio.swift` + `Info.plist` / `Entitlements.plist`) compiled with `xcrun swiftc` + `codesign`, emitting `~/.pi/agent/bin/pi-meta-oauth-voice-v1`
-- Windows: C# helper (`extensions/voice/windows-audio.cs`) compiled with `csc.exe` to `~/.pi/agent/bin/pi-meta-oauth-voice-v1.exe` when a compiler is found; PowerShell fallback (`extensions/voice/windows-audio.ps1` via `Add-Type` + `winmm.dll` `waveIn*`) runs when no compiler is present. Both speak the same line-delimited JSON protocol (`ready`/`audio`/`stopped`/`error`) and 16 kHz mono s16le framing as the Swift helper. Keep the Windows pair in sync with the Swift helper when changing the protocol.
+- Windows: C# helper (`extensions/voice/windows-audio.cs`) compiled with `csc.exe` to `~/.pi/agent/bin/pi-meta-oauth-voice-v1.exe` when a compiler is found; PowerShell fallback (`extensions/voice/windows-audio.ps1` via `Add-Type` + `winmm.dll` `waveIn*`) runs when no compiler is present.
+- Linux/WSL: shell helper (`extensions/voice/linux-audio.sh`) captures through `parec`, with `arecord` as a fallback. WSLg uses its inherited `PULSE_SERVER` (normally `unix:/mnt/wslg/PulseServer`) and `RDPSource`.
 
-`voice.ts` defaults `enabled` on for `darwin` and `win32` (see `loadSettings` / `isSupportedPlatform`) and the `/voice-on` guard checks both platforms. If adding a new platform, update those guards and ship a helper that implements the JSON protocol.
+All helpers speak the same line-delimited JSON protocol (`ready`/`audio`/`stopped`/`error`) and 16 kHz mono s16le framing. Keep them in sync when changing the protocol.
+
+`voice.ts` defaults `enabled` on for `darwin`, `win32`, and `linux` (see `loadSettings` / `isSupportedPlatform`) and the `/voice-on` guard checks all three platforms. If adding a new platform, update those guards and ship a helper that implements the JSON protocol.

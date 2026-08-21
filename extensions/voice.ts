@@ -165,7 +165,7 @@ class MetaVoiceController {
 	private enable(ctx: ExtensionContext): void {
 		if (!isSupportedPlatform()) {
 			ctx.ui.notify(
-				`Meta voice input is currently available only on macOS and Windows (current: ${supportedPlatformLabel()})`,
+				`Meta voice input is currently available only on macOS, Windows, and Linux (current: ${supportedPlatformLabel()})`,
 				"error",
 			);
 			return;
