@@ -17,6 +17,8 @@ import {
 } from "../extensions/meta.ts";
 
 const LIVE_CATALOG_SNAPSHOT_2026_08_10 = [
+	"muse-spark-1.3",
+	"muse-spark-1.3-contributor",
 	"muse-spark-1.2",
 	"muse-spark-1.2-contributor",
 	"muse-spark-1.1",
@@ -350,10 +352,8 @@ describe("Meta OAuth provider", () => {
 			allowNetwork: true,
 			signal: new AbortController().signal,
 		} satisfies RefreshModelsContext;
-		const models = await refreshMetaModels(
-			context,
-			(async () => jsonResponse({ data: [] })) as unknown as typeof fetch,
-		);
+		const models = await refreshMetaModels(context, (async () =>
+			jsonResponse({ data: [] })) as unknown as typeof fetch);
 
 		expect(models).toHaveLength(1);
 		expect(models[0]?.id).toBe(fallback.id);

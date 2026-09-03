@@ -88,11 +88,13 @@ Fallback models use a 1,048,576-token context window, up to 256K output tokens, 
 
 | id | pricing (input/output/cached) $/M |
 | --- | --- |
+| `muse-spark-1.3` | 1.25 / 4.25 / 0.15 |
+| `muse-spark-1.3-contributor` | 0.10 / 0.20 / 0.002 |
 | `muse-spark-1.2` | 1.25 / 4.25 / 0.15 |
 | `muse-spark-1.2-contributor` | 0.10 / 0.20 / 0.002 |
 | `muse-spark-1.1` | 1.25 / 4.25 / 0.15 |
 
-> **Contributor-model privacy:** the discounted contributor model allows Meta to use prompts and completions for product improvement, including training future Meta models. Use the standard `muse-spark-1.2` model if you do not want the contributor terms. See [Meta's model documentation](https://dev.meta.ai/docs/models).
+> **Contributor-model privacy:** discounted contributor models allow Meta to use prompts and completions for product improvement, including training future Meta models. Use a standard model such as `muse-spark-1.3` if you do not want the contributor terms. See [Meta's model documentation](https://dev.meta.ai/docs/models).
 
 To scope Pi's model picker to Meta models:
 
@@ -123,7 +125,7 @@ catalog.
 
 ```bash
 pi --list-models meta
-pi -p --provider meta --model muse-spark-1.2 "Reply exactly: META_OK"
+pi -p --provider meta --model muse-spark-1.3 "Reply exactly: META_OK"
 bun run typecheck
 bun test
 ```

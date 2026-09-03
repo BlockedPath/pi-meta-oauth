@@ -83,6 +83,56 @@ interface MetaCatalogModel {
 // despite UserMessage.content being string | (TextContent | ImageContent)[] .
 const FALLBACK_MODELS: MetaProviderModel[] = [
 	{
+		id: "muse-spark-1.3",
+		name: "Muse Spark 1.3",
+		reasoning: true,
+		thinkingLevelMap: {
+			off: null,
+			minimal: "minimal",
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: null,
+		},
+		// SAFETY: Meta supports video/audio inputs, while pi-ai 0.83/0.84 types only expose text/image.
+		input: [
+			"text",
+			"image",
+			"video",
+			"audio",
+		] as unknown as MetaProviderModel["input"],
+		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+		contextWindow: 1_048_576,
+		maxTokens: 256_000,
+		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
+	},
+	{
+		id: "muse-spark-1.3-contributor",
+		name: "Muse Spark 1.3 Contributor",
+		reasoning: true,
+		thinkingLevelMap: {
+			off: null,
+			minimal: "minimal",
+			low: "low",
+			medium: "medium",
+			high: "high",
+			xhigh: "xhigh",
+			max: null,
+		},
+		// SAFETY: Meta supports video/audio inputs, while pi-ai 0.83/0.84 types only expose text/image.
+		input: [
+			"text",
+			"image",
+			"video",
+			"audio",
+		] as unknown as MetaProviderModel["input"],
+		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
+		contextWindow: 1_048_576,
+		maxTokens: 256_000,
+		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
+	},
+	{
 		id: "muse-spark-1.2",
 		name: "Muse Spark 1.2",
 		reasoning: true,

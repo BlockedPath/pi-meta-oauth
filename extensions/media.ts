@@ -48,7 +48,10 @@ import {
 } from "./media/responses.ts";
 
 export { mediaInputFromSource } from "./media/mime.ts";
-export { maybeUploadLargeInlineBlocks, rewriteResponsesPayload } from "./media/payload.ts";
+export {
+	maybeUploadLargeInlineBlocks,
+	rewriteResponsesPayload,
+} from "./media/payload.ts";
 export {
 	extractMetaResponseUsage,
 	extractResponsesText,
@@ -205,13 +208,12 @@ export default function metaMedia(pi: ExtensionAPI): void {
 			}
 			if (apiKey) {
 				try {
-					const { payload: uploadedPayload } =
-						await maybeUploadLargeInlineBlocks(
-							payloadToCheck,
-							apiKey,
-							STORE_SAFE_INLINE_BYTES,
-							ctx.signal,
-						);
+					const { payload: uploadedPayload } = await maybeUploadLargeInlineBlocks(
+						payloadToCheck,
+						apiKey,
+						STORE_SAFE_INLINE_BYTES,
+						ctx.signal,
+					);
 					return uploadedPayload as unknown;
 				} catch {
 					const fallback = payloadToCheck as Record<string, unknown>;
@@ -296,7 +298,8 @@ export default function metaMedia(pi: ExtensionAPI): void {
 		label: "Meta Video Describe",
 		description:
 			"Analyze an MP4 video with Muse Spark, including visuals and embedded speech. Accepts a local path, public HTTPS/data URL, or Meta file_id. Results are capped by max_chars; when truncated, the full text is saved to a temp file for continuation with read offset/limit.",
-		promptSnippet: "Inspect video and embedded audio when the active model cannot",
+		promptSnippet:
+			"Inspect video and embedded audio when the active model cannot",
 		promptGuidelines: [
 			"Use meta_describe_video when the task depends on an MP4 video the active model cannot inspect directly.",
 			"Give meta_describe_video a task-specific prompt that asks for the exact visual, transcript, timestamp, or defect evidence needed next.",
@@ -304,31 +307,55 @@ export default function metaMedia(pi: ExtensionAPI): void {
 		],
 		parameters: Type.Object(
 			{
-				path: Type.Optional(Type.String({ description: "Local .mp4/.m4v path, relative to cwd or absolute" })),
-				url: Type.Optional(Type.String({ description: "Public HTTPS or data:video/mp4 URL" })),
-				file_id: Type.Optional(Type.String({ description: "Existing Meta Files API id" })),
-				prompt: Type.String({ description: "What evidence to extract from the video" }),
-				model: Type.Optional(Type.String({ description: "Muse model id, default muse-spark-1.2" })),
-				max_output_tokens: Type.Optional(Type.Integer({
-					minimum: MIN_MEDIA_MAX_OUTPUT_TOKENS,
-					maximum: MAX_MEDIA_MAX_OUTPUT_TOKENS,
-					description: `Muse generation budget, default ${DEFAULT_MEDIA_MAX_OUTPUT_TOKENS}`,
-				})),
-				max_chars: Type.Optional(Type.Integer({
-					minimum: 1_000,
-					maximum: MAX_MEDIA_MAX_CHARS,
-					description: `Maximum result characters returned inline, default ${DEFAULT_MEDIA_MAX_CHARS}`,
-				})),
+				path: Type.Optional(
+					Type.String({
+						description: "Local .mp4/.m4v path, relative to cwd or absolute",
+					}),
+				),
+				url: Type.Optional(
+					Type.String({ description: "Public HTTPS or data:video/mp4 URL" }),
+				),
+				file_id: Type.Optional(
+					Type.String({ description: "Existing Meta Files API id" }),
+				),
+				prompt: Type.String({
+					description: "What evidence to extract from the video",
+				}),
+				model: Type.Optional(
+					Type.String({ description: "Muse model id, default muse-spark-1.2" }),
+				),
+				max_output_tokens: Type.Optional(
+					Type.Integer({
+						minimum: MIN_MEDIA_MAX_OUTPUT_TOKENS,
+						maximum: MAX_MEDIA_MAX_OUTPUT_TOKENS,
+						description: `Muse generation budget, default ${DEFAULT_MEDIA_MAX_OUTPUT_TOKENS}`,
+					}),
+				),
+				max_chars: Type.Optional(
+					Type.Integer({
+						minimum: 1_000,
+						maximum: MAX_MEDIA_MAX_CHARS,
+						description: `Maximum result characters returned inline, default ${DEFAULT_MEDIA_MAX_CHARS}`,
+					}),
+				),
 			},
 			{ additionalProperties: false },
 		),
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			const { path, url, file_id, prompt, model, max_output_tokens, max_chars } = params as {
-				path?: string; url?: string; file_id?: string; prompt: string; model?: string;
-				max_output_tokens?: number; max_chars?: number;
-			};
+			const { path, url, file_id, prompt, model, max_output_tokens, max_chars } =
+				params as {
+					path?: string;
+					url?: string;
+					file_id?: string;
+					prompt: string;
+					model?: string;
+					max_output_tokens?: number;
+					max_chars?: number;
+				};
 			if ([path, url, file_id].filter(Boolean).length !== 1) {
-				throw new Error("meta_describe_video requires exactly one of path, url, or file_id");
+				throw new Error(
+					"meta_describe_video requires exactly one of path, url, or file_id",
+				);
 			}
 			try {
 				const apiKey = await safeGetMetaApiKey(ctx as ExtensionContext);
@@ -341,26 +368,51 @@ export default function metaMedia(pi: ExtensionAPI): void {
 					const absolute = resolve(ctx.cwd, path as string);
 					if (!existsSync(absolute)) throw new Error(`File not found: ${absolute}`);
 					const stat = statSync(absolute);
-					if (stat.size > FILES_API_LIMIT_BYTES) throw new Error(`File too large (1 GiB limit): ${path}`);
+					if (stat.size > FILES_API_LIMIT_BYTES)
+						throw new Error(`File too large (1 GiB limit): ${path}`);
 					rejectWrongMime("video", path as string, mimeForPath(absolute));
 					if (stat.size > STORE_SAFE_INLINE_BYTES) {
-						const upload = await uploadMetaFile(apiKey, absolute, automaticExpiry(), signal);
+						const upload = await uploadMetaFile(
+							apiKey,
+							absolute,
+							automaticExpiry(),
+							signal,
+						);
 						videoBlock = { type: "input_file", file_id: upload.id };
 					} else {
-						videoBlock = mediaInputFromSource(dataUrlForFile(absolute).dataUrl, basename(absolute), "video/mp4");
+						videoBlock = mediaInputFromSource(
+							dataUrlForFile(absolute).dataUrl,
+							basename(absolute),
+							"video/mp4",
+						);
 					}
 				}
 				const selectedModel = model ?? "muse-spark-1.2";
-				const { text, raw } = await callMetaResponses(apiKey, {
-					model: selectedModel,
-					store: false,
-					input: [{ type: "message", role: "user", content: [
-						{ type: "input_text", text: prompt },
-						videoBlock as Record<string, unknown>,
-					] }],
-					max_output_tokens: mediaMaxOutputTokens(max_output_tokens),
-				}, signal);
-				const output = await prepareMediaOutput({ text, response: raw, identity: toolCallId, maxChars: max_chars });
+				const { text, raw } = await callMetaResponses(
+					apiKey,
+					{
+						model: selectedModel,
+						store: false,
+						input: [
+							{
+								type: "message",
+								role: "user",
+								content: [
+									{ type: "input_text", text: prompt },
+									videoBlock as Record<string, unknown>,
+								],
+							},
+						],
+						max_output_tokens: mediaMaxOutputTokens(max_output_tokens),
+					},
+					signal,
+				);
+				const output = await prepareMediaOutput({
+					text,
+					response: raw,
+					identity: toolCallId,
+					maxChars: max_chars,
+				});
 				const usage = extractMetaResponseUsage(raw, selectedModel);
 				return {
 					content: [{ type: "text", text: output.text }],
@@ -386,30 +438,52 @@ export default function metaMedia(pi: ExtensionAPI): void {
 		parameters: Type.Object(
 			{
 				path: Type.Optional(Type.String({ description: "Local .wav/.mp3 path" })),
-				url: Type.Optional(Type.String({ description: "Public HTTPS or data audio URL" })),
-				file_id: Type.Optional(Type.String({ description: "Existing Meta Files API id" })),
-				prompt: Type.Optional(Type.String({ description: "Transcription or audio-analysis instruction" })),
-				model: Type.Optional(Type.String({ description: "Muse model id, default muse-spark-1.2" })),
-				max_output_tokens: Type.Optional(Type.Integer({
-					minimum: MIN_MEDIA_MAX_OUTPUT_TOKENS,
-					maximum: MAX_MEDIA_MAX_OUTPUT_TOKENS,
-					description: `Muse generation budget, default ${DEFAULT_MEDIA_MAX_OUTPUT_TOKENS}`,
-				})),
-				max_chars: Type.Optional(Type.Integer({
-					minimum: 1_000,
-					maximum: MAX_MEDIA_MAX_CHARS,
-					description: `Maximum transcript characters returned inline, default ${DEFAULT_MEDIA_MAX_CHARS}`,
-				})),
+				url: Type.Optional(
+					Type.String({ description: "Public HTTPS or data audio URL" }),
+				),
+				file_id: Type.Optional(
+					Type.String({ description: "Existing Meta Files API id" }),
+				),
+				prompt: Type.Optional(
+					Type.String({
+						description: "Transcription or audio-analysis instruction",
+					}),
+				),
+				model: Type.Optional(
+					Type.String({ description: "Muse model id, default muse-spark-1.2" }),
+				),
+				max_output_tokens: Type.Optional(
+					Type.Integer({
+						minimum: MIN_MEDIA_MAX_OUTPUT_TOKENS,
+						maximum: MAX_MEDIA_MAX_OUTPUT_TOKENS,
+						description: `Muse generation budget, default ${DEFAULT_MEDIA_MAX_OUTPUT_TOKENS}`,
+					}),
+				),
+				max_chars: Type.Optional(
+					Type.Integer({
+						minimum: 1_000,
+						maximum: MAX_MEDIA_MAX_CHARS,
+						description: `Maximum transcript characters returned inline, default ${DEFAULT_MEDIA_MAX_CHARS}`,
+					}),
+				),
 			},
 			{ additionalProperties: false },
 		),
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			const { path, url, file_id, prompt, model, max_output_tokens, max_chars } = params as {
-				path?: string; url?: string; file_id?: string; prompt?: string; model?: string;
-				max_output_tokens?: number; max_chars?: number;
-			};
+			const { path, url, file_id, prompt, model, max_output_tokens, max_chars } =
+				params as {
+					path?: string;
+					url?: string;
+					file_id?: string;
+					prompt?: string;
+					model?: string;
+					max_output_tokens?: number;
+					max_chars?: number;
+				};
 			if ([path, url, file_id].filter(Boolean).length !== 1) {
-				throw new Error("meta_transcribe_audio requires exactly one of path, url, or file_id");
+				throw new Error(
+					"meta_transcribe_audio requires exactly one of path, url, or file_id",
+				);
 			}
 			try {
 				const apiKey = await safeGetMetaApiKey(ctx as ExtensionContext);
@@ -422,27 +496,55 @@ export default function metaMedia(pi: ExtensionAPI): void {
 					const absolute = resolve(ctx.cwd, path as string);
 					if (!existsSync(absolute)) throw new Error(`File not found: ${absolute}`);
 					const stat = statSync(absolute);
-					if (stat.size > FILES_API_LIMIT_BYTES) throw new Error("Audio too large (1 GiB limit)");
+					if (stat.size > FILES_API_LIMIT_BYTES)
+						throw new Error("Audio too large (1 GiB limit)");
 					const mime = mimeForPath(absolute);
 					rejectWrongMime("audio", path as string, mime);
 					if (stat.size > STORE_SAFE_INLINE_BYTES) {
-						const upload = await uploadMetaFile(apiKey, absolute, automaticExpiry(), signal);
+						const upload = await uploadMetaFile(
+							apiKey,
+							absolute,
+							automaticExpiry(),
+							signal,
+						);
 						audioBlock = { type: "input_file", file_id: upload.id };
 					} else {
-						audioBlock = mediaInputFromSource(dataUrlForFile(absolute).dataUrl, basename(absolute), mime);
+						audioBlock = mediaInputFromSource(
+							dataUrlForFile(absolute).dataUrl,
+							basename(absolute),
+							mime,
+						);
 					}
 				}
 				const selectedModel = model ?? "muse-spark-1.2";
-				const { text, raw } = await callMetaResponses(apiKey, {
-					model: selectedModel,
-					store: false,
-					input: [{ type: "message", role: "user", content: [
-						{ type: "input_text", text: prompt ?? "Transcribe this audio. Return only the transcript." },
-						audioBlock as Record<string, unknown>,
-					] }],
-					max_output_tokens: mediaMaxOutputTokens(max_output_tokens),
-				}, signal);
-				const output = await prepareMediaOutput({ text, response: raw, identity: toolCallId, maxChars: max_chars });
+				const { text, raw } = await callMetaResponses(
+					apiKey,
+					{
+						model: selectedModel,
+						store: false,
+						input: [
+							{
+								type: "message",
+								role: "user",
+								content: [
+									{
+										type: "input_text",
+										text: prompt ?? "Transcribe this audio. Return only the transcript.",
+									},
+									audioBlock as Record<string, unknown>,
+								],
+							},
+						],
+						max_output_tokens: mediaMaxOutputTokens(max_output_tokens),
+					},
+					signal,
+				);
+				const output = await prepareMediaOutput({
+					text,
+					response: raw,
+					identity: toolCallId,
+					maxChars: max_chars,
+				});
 				const usage = extractMetaResponseUsage(raw, selectedModel);
 				return {
 					content: [{ type: "text", text: output.text }],
@@ -463,30 +565,42 @@ export default function metaMedia(pi: ExtensionAPI): void {
 		parameters: Type.Object(
 			{
 				path: Type.String({ description: "Local file path to upload" }),
-				expires_after_seconds: Type.Optional(Type.Integer({
-					minimum: MIN_UPLOAD_EXPIRY_SECONDS,
-					maximum: MAX_UPLOAD_EXPIRY_SECONDS,
-					description: `Expiry in seconds, default ${EXPLICIT_UPLOAD_EXPIRY_SECONDS} (7 days)`,
-				})),
-				retain: Type.Optional(Type.Boolean({ description: "Keep indefinitely instead of applying an expiry" })),
+				expires_after_seconds: Type.Optional(
+					Type.Integer({
+						minimum: MIN_UPLOAD_EXPIRY_SECONDS,
+						maximum: MAX_UPLOAD_EXPIRY_SECONDS,
+						description: `Expiry in seconds, default ${EXPLICIT_UPLOAD_EXPIRY_SECONDS} (7 days)`,
+					}),
+				),
+				retain: Type.Optional(
+					Type.Boolean({
+						description: "Keep indefinitely instead of applying an expiry",
+					}),
+				),
 			},
 			{ additionalProperties: false },
 		),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const { path, expires_after_seconds, retain } = params as {
-				path: string; expires_after_seconds?: number; retain?: boolean;
+				path: string;
+				expires_after_seconds?: number;
+				retain?: boolean;
 			};
 			if (retain && expires_after_seconds !== undefined) {
-				throw new Error("meta_upload_file accepts either retain=true or expires_after_seconds, not both");
+				throw new Error(
+					"meta_upload_file accepts either retain=true or expires_after_seconds, not both",
+				);
 			}
 			try {
 				const apiKey = await safeGetMetaApiKey(ctx as ExtensionContext);
 				const absolute = resolve(ctx.cwd, path);
 				if (!existsSync(absolute)) throw new Error(`File not found: ${absolute}`);
-				const expiresAfter = retain ? undefined : {
-					anchor: "created_at" as const,
-					seconds: expires_after_seconds ?? EXPLICIT_UPLOAD_EXPIRY_SECONDS,
-				};
+				const expiresAfter = retain
+					? undefined
+					: {
+							anchor: "created_at" as const,
+							seconds: expires_after_seconds ?? EXPLICIT_UPLOAD_EXPIRY_SECONDS,
+						};
 				const result = await uploadMetaFile(apiKey, absolute, expiresAfter, signal);
 				const retention = retain
 					? "retained without expiry"
@@ -494,7 +608,12 @@ export default function metaMedia(pi: ExtensionAPI): void {
 						? `expires_at ${result.expires_at}`
 						: `expires after ${expiresAfter?.seconds} seconds`;
 				return {
-					content: [{ type: "text", text: `Uploaded ${basename(absolute)} to ${result.id} (${result.bytes} bytes, ${retention}).` }],
+					content: [
+						{
+							type: "text",
+							text: `Uploaded ${basename(absolute)} to ${result.id} (${result.bytes} bytes, ${retention}).`,
+						},
+					],
 					details: result,
 				};
 			} catch (error) {
@@ -508,7 +627,8 @@ export default function metaMedia(pi: ExtensionAPI): void {
 		label: "Meta File Analyze",
 		description:
 			"Analyze one or more images, PDFs, videos, or audio files with Muse Spark. Use path/url/file_id for one source, or ordered sources for comparisons. Images and PDF pages share Meta's 50-image budget; PDFs include text from the first 100 pages and images from the first 50 pages. Truncated text is saved for continuation with read offset/limit.",
-		promptSnippet: "Inspect images, PDFs, or mixed media when the active model cannot",
+		promptSnippet:
+			"Inspect images, PDFs, or mixed media when the active model cannot",
 		promptGuidelines: [
 			"Use meta_analyze_file when the task depends on an image, PDF, or generic media file the active model cannot inspect directly.",
 			"Give meta_analyze_file a task-specific prompt that asks for the exact visible text, layout, comparison, defect, or action evidence needed next.",
@@ -517,61 +637,134 @@ export default function metaMedia(pi: ExtensionAPI): void {
 		parameters: Type.Object(
 			{
 				path: Type.Optional(Type.String({ description: "Single local file path" })),
-				url: Type.Optional(Type.String({ description: "Single public HTTPS or data URL" })),
-				file_id: Type.Optional(Type.String({ description: "Single existing Meta file_id" })),
-				sources: Type.Optional(Type.Array(Type.Object({
-					source: Type.String({ description: "Local path, HTTPS/data URL, or Meta file_id" }),
-					label: Type.Optional(Type.String({ description: "Human-readable label such as Before or After" })),
-				}, { additionalProperties: false }), {
-					minItems: 1,
-					maxItems: MAX_ANALYSIS_SOURCES,
-					description: "Ordered sources for comparison or combined analysis",
-				})),
+				url: Type.Optional(
+					Type.String({ description: "Single public HTTPS or data URL" }),
+				),
+				file_id: Type.Optional(
+					Type.String({ description: "Single existing Meta file_id" }),
+				),
+				sources: Type.Optional(
+					Type.Array(
+						Type.Object(
+							{
+								source: Type.String({
+									description: "Local path, HTTPS/data URL, or Meta file_id",
+								}),
+								label: Type.Optional(
+									Type.String({
+										description: "Human-readable label such as Before or After",
+									}),
+								),
+							},
+							{ additionalProperties: false },
+						),
+						{
+							minItems: 1,
+							maxItems: MAX_ANALYSIS_SOURCES,
+							description: "Ordered sources for comparison or combined analysis",
+						},
+					),
+				),
 				prompt: Type.String({ description: "What evidence to extract or compare" }),
-				model: Type.Optional(Type.String({ description: "Muse model id, default muse-spark-1.2" })),
-				max_output_tokens: Type.Optional(Type.Integer({
-					minimum: MIN_MEDIA_MAX_OUTPUT_TOKENS,
-					maximum: MAX_MEDIA_MAX_OUTPUT_TOKENS,
-					description: `Muse generation budget, default ${DEFAULT_MEDIA_MAX_OUTPUT_TOKENS}`,
-				})),
-				max_chars: Type.Optional(Type.Integer({
-					minimum: 1_000,
-					maximum: MAX_MEDIA_MAX_CHARS,
-					description: `Maximum result characters returned inline, default ${DEFAULT_MEDIA_MAX_CHARS}`,
-				})),
+				model: Type.Optional(
+					Type.String({ description: "Muse model id, default muse-spark-1.2" }),
+				),
+				max_output_tokens: Type.Optional(
+					Type.Integer({
+						minimum: MIN_MEDIA_MAX_OUTPUT_TOKENS,
+						maximum: MAX_MEDIA_MAX_OUTPUT_TOKENS,
+						description: `Muse generation budget, default ${DEFAULT_MEDIA_MAX_OUTPUT_TOKENS}`,
+					}),
+				),
+				max_chars: Type.Optional(
+					Type.Integer({
+						minimum: 1_000,
+						maximum: MAX_MEDIA_MAX_CHARS,
+						description: `Maximum result characters returned inline, default ${DEFAULT_MEDIA_MAX_CHARS}`,
+					}),
+				),
 			},
 			{ additionalProperties: false },
 		),
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			const { path, url, file_id, sources, prompt, model, max_output_tokens, max_chars } = params as {
-				path?: string; url?: string; file_id?: string; sources?: AnalysisSource[];
-				prompt: string; model?: string; max_output_tokens?: number; max_chars?: number;
+			const {
+				path,
+				url,
+				file_id,
+				sources,
+				prompt,
+				model,
+				max_output_tokens,
+				max_chars,
+			} = params as {
+				path?: string;
+				url?: string;
+				file_id?: string;
+				sources?: AnalysisSource[];
+				prompt: string;
+				model?: string;
+				max_output_tokens?: number;
+				max_chars?: number;
 			};
-			const legacySources = [path, url, file_id].filter((value): value is string => Boolean(value));
-			if (legacySources.length > 1 || (legacySources.length === 1 && sources) || (legacySources.length === 0 && !sources)) {
-				throw new Error("meta_analyze_file requires exactly one path/url/file_id or a sources array");
+			const legacySources = [path, url, file_id].filter((value): value is string =>
+				Boolean(value),
+			);
+			if (
+				legacySources.length > 1 ||
+				(legacySources.length === 1 && sources) ||
+				(legacySources.length === 0 && !sources)
+			) {
+				throw new Error(
+					"meta_analyze_file requires exactly one path/url/file_id or a sources array",
+				);
 			}
 			if (sources && sources.length > MAX_ANALYSIS_SOURCES) {
-				throw new Error(`meta_analyze_file supports at most ${MAX_ANALYSIS_SOURCES} sources`);
+				throw new Error(
+					`meta_analyze_file supports at most ${MAX_ANALYSIS_SOURCES} sources`,
+				);
 			}
 			try {
 				const apiKey = await safeGetMetaApiKey(ctx as ExtensionContext);
-				const requestedSources: AnalysisSource[] = sources ?? [{ source: legacySources[0] as string }];
-				const content: ResponsesContentBlock[] = [{ type: "input_text", text: prompt }];
+				const requestedSources: AnalysisSource[] = sources ?? [
+					{ source: legacySources[0] as string },
+				];
+				const content: ResponsesContentBlock[] = [
+					{ type: "input_text", text: prompt },
+				];
 				for (const [index, item] of requestedSources.entries()) {
 					if (requestedSources.length > 1 || item.label) {
-						content.push({ type: "input_text", text: `${sourceLabel(item, index)}:` });
+						content.push({
+							type: "input_text",
+							text: `${sourceLabel(item, index)}:`,
+						});
 					}
-					content.push(await resolveGenericMediaSource(apiKey, ctx.cwd, item.source, signal));
+					content.push(
+						await resolveGenericMediaSource(apiKey, ctx.cwd, item.source, signal),
+					);
 				}
 				const selectedModel = model ?? "muse-spark-1.2";
-				const { text, raw } = await callMetaResponses(apiKey, {
-					model: selectedModel,
-					store: false,
-					input: [{ type: "message", role: "user", content: content as Record<string, unknown>[] }],
-					max_output_tokens: mediaMaxOutputTokens(max_output_tokens),
-				}, signal);
-				const output = await prepareMediaOutput({ text, response: raw, identity: toolCallId, maxChars: max_chars });
+				const { text, raw } = await callMetaResponses(
+					apiKey,
+					{
+						model: selectedModel,
+						store: false,
+						input: [
+							{
+								type: "message",
+								role: "user",
+								content: content as Record<string, unknown>[],
+							},
+						],
+						max_output_tokens: mediaMaxOutputTokens(max_output_tokens),
+					},
+					signal,
+				);
+				const output = await prepareMediaOutput({
+					text,
+					response: raw,
+					identity: toolCallId,
+					maxChars: max_chars,
+				});
 				const usage = extractMetaResponseUsage(raw, selectedModel);
 				return {
 					content: [{ type: "text", text: output.text }],
@@ -737,8 +930,7 @@ export default function metaMedia(pi: ExtensionAPI): void {
 				const apiKey = await safeGetMetaApiKey(ctx as unknown as ExtensionContext);
 				let block: ResponsesContentBlock;
 				if (isFileId(source)) block = { type: "input_file", file_id: source };
-				else if (isRemoteMediaSource(source))
-					block = mediaInputFromSource(source);
+				else if (isRemoteMediaSource(source)) block = mediaInputFromSource(source);
 				else {
 					const abs = resolve(cwd, source);
 					if (!existsSync(abs)) throw new Error(`File not found: ${abs}`);
