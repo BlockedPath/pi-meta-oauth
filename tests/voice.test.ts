@@ -74,6 +74,17 @@ describe("Meta voice mode", () => {
 		}
 	});
 
+	test("includes a valid Linux helper script in the checkout", () => {
+		const script = join(
+			dirname(fileURLToPath(import.meta.url)),
+			"../extensions/voice/linux-audio.sh",
+		);
+		expect(existsSync(script)).toBe(true);
+		if (process.platform !== "win32") {
+			expect(() => execFileSync("/bin/bash", ["-n", script])).not.toThrow();
+		}
+	});
+
 	test("packs every required voice runtime asset", () => {
 		const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 		const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
@@ -106,6 +117,7 @@ describe("Meta voice mode", () => {
 			"extensions/voice/Entitlements.plist",
 			"extensions/voice/windows-audio.cs",
 			"extensions/voice/windows-audio.ps1",
+			"extensions/voice/linux-audio.sh",
 		]) {
 			expect(paths.has(requiredPath)).toBe(true);
 		}
