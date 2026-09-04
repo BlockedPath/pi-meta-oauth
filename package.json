@@ -1,15 +1,13 @@
 {
   "name": "pi-meta-oauth",
   "version": "0.5.0",
-  "description": "Meta Model API OAuth provider and Muse-style voice dictation for pi",
+  "description": "Meta Model API OAuth provider for pi",
   "keywords": [
     "pi-package",
     "meta",
     "muse-spark",
     "oauth",
-    "provider",
-    "voice",
-    "dictation"
+    "provider"
   ],
   "license": "MIT",
   "type": "module",
@@ -28,22 +26,17 @@
   },
   "pi": {
     "extensions": [
-      "./extensions/meta.ts",
-      "./extensions/media.ts",
-      "./extensions/voice.ts"
+      "./extensions/meta.ts"
     ],
     "image": "https://raw.githubusercontent.com/BlockedPath/pi-meta-oauth/main/preview.png"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.83.0 <0.85.0",
-    "@earendil-works/pi-coding-agent": ">=0.83.0 <0.85.0",
-    "@earendil-works/pi-tui": ">=0.83.0 <0.85.0",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": ">=0.83.0 <0.85.0"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
-    "@earendil-works/pi-tui": "0.83.0",
     "bun-types": "latest",
     "typescript": "^5.9.0"
   },

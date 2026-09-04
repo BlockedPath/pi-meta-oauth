@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- Voice dictation, platform audio helpers, and Meta ASR integration from the OAuth-only branch.
+- Media analysis tools, commands, upload helpers, and request rewriting from the OAuth-only branch.
+- Unused `@earendil-works/pi-tui` and `typebox` runtime peer dependencies.
+
+### Changed
+
+- Register only `extensions/meta.ts` and advertise only Pi-native text and image model inputs.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added
