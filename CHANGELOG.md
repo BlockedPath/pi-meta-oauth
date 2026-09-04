@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-04
+
+### Removed
+
+- Voice dictation, platform audio helpers, and Meta ASR integration from the OAuth-only branch.
+- Media analysis tools, commands, upload helpers, and request rewriting from the OAuth-only branch.
+- Unused `@earendil-works/pi-tui` and `typebox` runtime peer dependencies.
+
+### Changed
+
+- Register only `extensions/meta.ts` and advertise only Pi-native text and image model inputs.
+
 ## [0.5.0] - 2026-09-03
 
 ### Added
@@ -46,5 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.4.4...v0.5.0
 [0.4.4]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.4.3...v0.4.4

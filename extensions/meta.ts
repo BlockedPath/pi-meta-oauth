@@ -16,7 +16,6 @@ export const META_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_MODEL_CATALOG_URL = "https://api.meta.ai/v1/models";
 export const META_AUTH_BASE_URL = "https://auth.meta.com";
 export const META_CLIENT_ID = "1031625952748946";
-export const META_FILES_URL = `${META_API_BASE_URL}/files`;
 const META_ENV_VAR = "META_API_KEY";
 
 const DEVICE_AUTHORIZATION_URL = `${META_AUTH_BASE_URL}/oidc/device/authorization/`;
@@ -77,10 +76,6 @@ interface MetaCatalogModel {
 	};
 }
 
-// Media capabilities kept as "text"+"image" for pi-ai type compat (pi-ai 0.83/0.84 only allows those),
-// with "video"/"audio" advertised via cast so future pi-ai that expands the union picks them up.
-// See media.ts for the before_provider_request rewrite that makes @video/@audio work today
-// despite UserMessage.content being string | (TextContent | ImageContent)[] .
 const FALLBACK_MODELS: MetaProviderModel[] = [
 	{
 		id: "muse-spark-1.3",
@@ -95,13 +90,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		// SAFETY: Meta supports video/audio inputs, while pi-ai 0.83/0.84 types only expose text/image.
-		input: [
-			"text",
-			"image",
-			"video",
-			"audio",
-		] as unknown as MetaProviderModel["input"],
+		input: ["text", "image"],
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -120,13 +109,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		// SAFETY: Meta supports video/audio inputs, while pi-ai 0.83/0.84 types only expose text/image.
-		input: [
-			"text",
-			"image",
-			"video",
-			"audio",
-		] as unknown as MetaProviderModel["input"],
+		input: ["text", "image"],
 		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -145,12 +128,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		input: [
-			"text",
-			"image",
-			"video",
-			"audio",
-		] as unknown as MetaProviderModel["input"],
+		input: ["text", "image"],
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -169,12 +147,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		input: [
-			"text",
-			"image",
-			"video",
-			"audio",
-		] as unknown as MetaProviderModel["input"],
+		input: ["text", "image"],
 		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -193,12 +166,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			xhigh: "xhigh",
 			max: null,
 		},
-		input: [
-			"text",
-			"image",
-			"video",
-			"audio",
-		] as unknown as MetaProviderModel["input"],
+		input: ["text", "image"],
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
 		contextWindow: 1_048_576,
 		maxTokens: 256_000,
@@ -425,19 +393,10 @@ function modalitiesToInput(
 	modalities: string[] | undefined,
 	fallback: MetaProviderModel["input"] | undefined,
 ): MetaProviderModel["input"] {
-	if (!modalities)
-		return fallback ?? (["text"] as unknown as MetaProviderModel["input"]);
-	const input: string[] = ["text"];
+	if (!modalities) return fallback ?? ["text"];
+	const input: MetaProviderModel["input"] = ["text"];
 	if (modalities.includes("image")) input.push("image");
-	// Advertised via cast until pi-ai expands Model.input union beyond text|image.
-	// The before_provider_request hook in media.ts rewrites these to typed media blocks at request time.
-	if (modalities.includes("video")) input.push("video");
-	if (modalities.includes("audio")) input.push("audio");
-	// Some catalogs expose "document"/"pdf" as a modality for PDF handling.
-	if (modalities.includes("document") || modalities.includes("pdf")) {
-		if (!input.includes("image")) input.push("image"); // PDFs count toward image budget
-	}
-	return input as unknown as MetaProviderModel["input"];
+	return input;
 }
 
 export function toProviderModels(
@@ -570,6 +529,8 @@ export async function refreshMetaModels(
 	context: RefreshModelsContext,
 	fetchImpl: Fetch = fetch,
 ): Promise<MetaProviderModel[]> {
+	// SAFETY: CompatibleRefreshContext is the union of the Pi 0.83 and 0.84
+	// refresh-context fields that this adapter probes defensively at runtime.
 	const compatibleContext = context as unknown as CompatibleRefreshContext;
 	if (!context.allowNetwork || context.signal?.aborted) {
 		const cached = await cachedMetaModels(compatibleContext);
@@ -645,9 +606,11 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * setdefault `prompt_cache_retention: 24h`, and drop `reasoning.effort: none`
  * because Meta 400s on it.
  */
-export function applyMetaResponsesCacheHints(payload: unknown): unknown {
+export function applyMetaResponsesCacheHints(
+	payload: unknown,
+): Record<string, unknown> | undefined {
 	const body = asRecord(payload);
-	if (!body) return payload;
+	if (!body) return undefined;
 	if (body.prompt_cache_retention === undefined) {
 		body.prompt_cache_retention = META_PROMPT_CACHE_RETENTION;
 	}

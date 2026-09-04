@@ -12,10 +12,6 @@ import {
 	toProviderModels,
 } from "../extensions/meta.ts";
 import metaOAuthProvider from "../extensions/meta.ts";
-import {
-	callMetaResponses,
-	extractMetaResponseUsage,
-} from "../extensions/media/responses.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -173,12 +169,26 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		});
 	});
 
-	test("advertises video and audio on bundled Muse models", () => {
+	test("advertises only native text and image inputs", () => {
 		for (const model of fallbackModels()) {
-			expect(model.input).toEqual(
-				expect.arrayContaining(["text", "image", "video", "audio"]),
-			);
+			expect(model.input).toEqual(["text", "image"]);
 		}
+		expect(
+			toProviderModels({
+				data: [
+					{
+						id: "muse-spark-test",
+						metadata: {
+							"muse-code": {
+								modalities: {
+									input: ["text", "image", "video", "audio", "pdf"],
+								},
+							},
+						},
+					},
+				],
+			})[0]?.input,
+		).toEqual(["text", "image"]);
 	});
 
 	test("setdefault prompt_cache_retention 24h and preserve an explicit override", () => {
@@ -294,33 +304,6 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		});
 	});
 
-	test("direct media Responses calls also send the 24h retention hint", async () => {
-		const originalFetch = globalThis.fetch;
-		let url = "";
-		let body: Record<string, unknown> | undefined;
-		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-			url = String(input);
-			body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
-			return new Response(JSON.stringify({ output_text: "ok" }), {
-				status: 200,
-				headers: { "Content-Type": "application/json" },
-			});
-		}) as typeof fetch;
-		try {
-			await callMetaResponses("test-key", {
-				model: "muse-spark-1.2",
-				input: [],
-			});
-		} finally {
-			globalThis.fetch = originalFetch;
-		}
-		expect(url).toBe("https://api.meta.ai/v1/responses");
-		expect(body).toMatchObject({
-			model: "muse-spark-1.2",
-			store: false,
-			prompt_cache_retention: "24h",
-		});
-	});
 });
 
 function liveCachePrefix(): string {
@@ -357,14 +340,45 @@ function liveCachePayload(): Record<string, unknown> {
 	};
 }
 
-function usageSummary(raw: unknown): string {
-	const usage = extractMetaResponseUsage(raw, LIVE_CACHE_MODEL);
-	if (!usage) {
-		return `no usage in ${JSON.stringify(raw).slice(0, 500)}`;
+interface LiveResponseUsage {
+	input_tokens?: number;
+	output_tokens?: number;
+	input_tokens_details?: { cached_tokens?: number };
+}
+
+interface LiveResponse {
+	usage?: LiveResponseUsage;
+}
+
+async function callLiveMetaResponses(
+	apiKey: string,
+	payload: Record<string, unknown>,
+): Promise<LiveResponse> {
+	const body = applyMetaResponsesCacheHints({ ...payload, store: false });
+	const response = await fetch(`${META_API_BASE_URL}/responses`, {
+		method: "POST",
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${apiKey}`,
+			"Content-Type": "application/json",
+		},
+		body: JSON.stringify(body),
+	});
+	const raw = (await response.json()) as LiveResponse;
+	if (!response.ok) {
+		throw new Error(
+			`Meta Responses cache probe failed (HTTP ${response.status}): ${JSON.stringify(raw).slice(0, 500)}`,
+		);
 	}
-	const billed = usage.input + usage.cacheRead + usage.cacheWrite;
-	const pct = billed > 0 ? Math.round((usage.cacheRead / billed) * 100) : 0;
-	return `cache=${usage.cacheRead}/${billed} (${pct}%) input=${usage.input} output=${usage.output}`;
+	return raw;
+}
+
+function usageSummary(raw: LiveResponse): string {
+	const input = raw.usage?.input_tokens ?? 0;
+	const output = raw.usage?.output_tokens ?? 0;
+	const cacheRead = raw.usage?.input_tokens_details?.cached_tokens ?? 0;
+	const pct = input > 0 ? Math.round((cacheRead / input) * 100) : 0;
+	return `cache=${cacheRead}/${input} (${pct}%) input=${input - cacheRead} output=${output}`;
 }
 
 describe("Meta live prompt-cache probe", () => {
@@ -373,22 +387,21 @@ describe("Meta live prompt-cache probe", () => {
 		async () => {
 			if (!liveApiKey) throw new Error("PI_META_LIVE_API_KEY is required");
 			const payload = liveCachePayload();
-			const first = await callMetaResponses(liveApiKey, { ...payload });
-			let second = await callMetaResponses(liveApiKey, { ...payload });
-			let secondUsage = extractMetaResponseUsage(second.raw, LIVE_CACHE_MODEL);
-			if (!secondUsage?.cacheRead) {
+			const first = await callLiveMetaResponses(liveApiKey, { ...payload });
+			let second = await callLiveMetaResponses(liveApiKey, { ...payload });
+			let cacheRead = second.usage?.input_tokens_details?.cached_tokens ?? 0;
+			if (!cacheRead) {
 				await Bun.sleep(2_000);
-				second = await callMetaResponses(liveApiKey, { ...payload });
-				secondUsage = extractMetaResponseUsage(second.raw, LIVE_CACHE_MODEL);
+				second = await callLiveMetaResponses(liveApiKey, { ...payload });
+				cacheRead = second.usage?.input_tokens_details?.cached_tokens ?? 0;
 			}
-			const billed =
-				(secondUsage?.input ?? 0) +
-				(secondUsage?.cacheRead ?? 0) +
-				(secondUsage?.cacheWrite ?? 0);
-			expect(billed, `first ${usageSummary(first.raw)}`).toBeGreaterThan(1_000);
 			expect(
-				secondUsage?.cacheRead,
-				`first ${usageSummary(first.raw)}; second ${usageSummary(second.raw)}`,
+				second.usage?.input_tokens,
+				`first ${usageSummary(first)}`,
+			).toBeGreaterThan(1_000);
+			expect(
+				cacheRead,
+				`first ${usageSummary(first)}; second ${usageSummary(second)}`,
 			).toBeGreaterThan(0);
 		},
 		120_000,
