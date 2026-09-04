@@ -249,8 +249,14 @@ export async function mintMetaApiKey(
 	const body = (await responseBody(response)) as MintResponse &
 		Record<string, unknown>;
 	if (!response.ok) {
+		const detail = errorDetail(body);
+		if (response.status === 401 || response.status === 403) {
+			throw new Error(
+				`Meta session expired (HTTP ${response.status}); run /login meta again${detail ? `: ${detail}` : ""}`,
+			);
+		}
 		throw new Error(
-			`Meta API-key mint failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
+			`Meta API-key mint failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`,
 		);
 	}
 	if (typeof body.api_key !== "string" || !body.api_key) {

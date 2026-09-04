@@ -520,6 +520,28 @@ describe("Meta OAuth provider", () => {
 		expect(requests.at(-1)?.authorization).toBe("Bearer identity-token");
 	});
 
+	for (const status of [401, 403]) {
+		test(`directs expired ${status} sessions back to /login meta`, async () => {
+			const fetchMock = (async () =>
+				jsonResponse(
+					{ error: "invalid_token", error_description: "Identity expired" },
+					status,
+				)) as unknown as typeof fetch;
+			await expect(
+				refreshMetaToken(
+					{
+						refresh: "expired-identity-token",
+						access: "expired-api-key",
+						expires: Date.now(),
+					},
+					fetchMock,
+				),
+			).rejects.toThrow(
+				`Meta session expired (HTTP ${status}); run /login meta again: Identity expired`,
+			);
+		});
+	}
+
 	test("reports account setup when minting yields no API key", async () => {
 		const fetchMock = (async () =>
 			jsonResponse({
