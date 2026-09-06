@@ -67,6 +67,40 @@ describe("Meta OAuth provider", () => {
 		});
 	});
 
+	// Live-probed 2026-09-06: POST /v1/responses accepts reasoning.effort
+	// "max" only on muse-spark-1.3; every other Muse model 400s with
+	// "Supported values: [minimal, low, medium, high, xhigh]". The bare
+	// catalog carries no variants block, so known IDs inherit max support
+	// from FALLBACK_MODELS while server-advertised variants still win.
+	test("exposes max effort only where the model supports it", () => {
+		const models = toProviderModels({
+			data: [
+				{ id: "muse-spark-1.3" },
+				{ id: "muse-spark-1.2" },
+				{
+					id: "muse-spark-future",
+					metadata: {
+						"muse-code": { variants: { max: { reasoningEffort: "ultra" } } },
+					},
+				},
+			],
+		});
+
+		expect(models).toHaveLength(3);
+		const byId = Object.fromEntries(models.map((m) => [m.id, m]));
+		expect(byId["muse-spark-1.3"]?.thinkingLevelMap).toMatchObject({
+			xhigh: "xhigh",
+			max: "max",
+		});
+		expect(byId["muse-spark-1.2"]?.thinkingLevelMap).toMatchObject({
+			xhigh: "xhigh",
+			max: null,
+		});
+		expect(byId["muse-spark-future"]?.thinkingLevelMap).toMatchObject({
+			max: "ultra",
+		});
+	});
+
 	// Live-endpoint drift, observed 2026-08-10: GET /v1/models returned bare
 	// OpenAI-style objects -- {id, object, created, owned_by} -- without a
 	// metadata["muse-code"] block. Known IDs map entirely from FALLBACK_MODELS;
