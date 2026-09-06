@@ -149,7 +149,12 @@ describe("Meta Responses cache and reasoning contracts", () => {
 	test("keeps off/max unmapped so Meta never receives reasoning.effort none by default", () => {
 		for (const model of fallbackModels()) {
 			expect(model.thinkingLevelMap?.off).toBeNull();
-			expect(model.thinkingLevelMap?.max).toBeNull();
+			if (model.id === "muse-spark-1.3") {
+				// Live-probed 2026-09-06: only muse-spark-1.3 accepts effort "max".
+				expect(model.thinkingLevelMap?.max).toBe("max");
+			} else {
+				expect(model.thinkingLevelMap?.max).toBeNull();
+			}
 		}
 		const catalogued = toProviderModels({
 			data: [
