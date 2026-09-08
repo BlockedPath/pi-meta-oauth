@@ -76,103 +76,72 @@ interface MetaCatalogModel {
 	};
 }
 
+const PAID_COST = { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 };
+const CONTRIBUTOR_COST = {
+	input: 0.1,
+	output: 0.2,
+	cacheRead: 0.002,
+	cacheWrite: 0,
+};
+const SPARK_THINKING: NonNullable<MetaProviderModel["thinkingLevelMap"]> = {
+	off: null,
+	minimal: "minimal",
+	low: "low",
+	medium: "medium",
+	high: "high",
+	xhigh: "xhigh",
+	max: null,
+};
+
+function sparkModel(
+	id: string,
+	name: string,
+	cost: MetaProviderModel["cost"],
+	thinkingLevelMap: NonNullable<
+		MetaProviderModel["thinkingLevelMap"]
+	> = SPARK_THINKING,
+): MetaProviderModel {
+	return {
+		id,
+		name,
+		reasoning: true,
+		thinkingLevelMap,
+		// SAFETY: pi-ai 0.83/0.84 Model.input is text|image only; video/audio are advertised for later pi-ai and rewritten in media.ts.
+		input: [
+			"text",
+			"image",
+			"video",
+			"audio",
+		] as unknown as MetaProviderModel["input"],
+		cost,
+		contextWindow: 1_048_576,
+		maxTokens: 256_000,
+		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
+	};
+}
+
 const FALLBACK_MODELS: MetaProviderModel[] = [
-	{
-		id: "muse-spark-1.3",
-		name: "Muse Spark 1.3",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.3-contributor",
-		name: "Muse Spark 1.3 Contributor",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.2",
-		name: "Muse Spark 1.2",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.2-contributor",
-		name: "Muse Spark 1.2 Contributor",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.1",
-		name: "Muse Spark 1.1",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
+	// Meta Model API ids only (not OpenCode Zen `*-contributor-free`).
+	// 1.3 standard is the only Spark that maps thinking `max` → `max`.
+	sparkModel("muse-spark-1.3", "Muse Spark 1.3", PAID_COST, {
+		...SPARK_THINKING,
+		max: "max",
+	}),
+	sparkModel(
+		"muse-spark-1.3-contributor",
+		"Muse Spark 1.3 Contributor",
+		CONTRIBUTOR_COST,
+	),
+	sparkModel("muse-spark-1.2", "Muse Spark 1.2", PAID_COST),
+	sparkModel(
+		"muse-spark-1.2-contributor",
+		"Muse Spark 1.2 Contributor",
+		CONTRIBUTOR_COST,
+	),
+	sparkModel("muse-spark-1.1", "Muse Spark 1.1", PAID_COST),
 ];
+
+export const DEFAULT_MUSE_MODEL = FALLBACK_MODELS[0].id;
 
 function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -399,7 +368,9 @@ function modalitiesToInput(
 	modalities: string[] | undefined,
 	fallback: MetaProviderModel["input"] | undefined,
 ): MetaProviderModel["input"] {
-	if (!modalities) return fallback ?? ["text"];
+	if (!modalities)
+		// SAFETY: empty catalog modalities → text-only; union is still text|image in pi-ai 0.83/0.84.
+		return fallback ?? ["text"];
 	const input: MetaProviderModel["input"] = ["text"];
 	if (modalities.includes("image")) input.push("image");
 	return input;
