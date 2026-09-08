@@ -174,7 +174,14 @@ describe("Meta Responses cache and reasoning contracts", () => {
 
 	test("advertises text/image plus video/audio inputs on fallbacks", () => {
 		for (const model of fallbackModels()) {
-			expect(model.input).toEqual(["text", "image", "video", "audio"]);
+			// input is text|image in pi-ai 0.83/0.84 types; fallbacks advertise
+			// video/audio via the same cast as sparkModel().
+			expect(model.input as unknown as string[]).toEqual([
+				"text",
+				"image",
+				"video",
+				"audio",
+			]);
 		}
 		expect(
 			toProviderModels({
