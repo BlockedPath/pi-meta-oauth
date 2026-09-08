@@ -1,9 +1,10 @@
-/// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
+
 import type {
 	ModelsStoreEntry,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
+import type { MetaProviderModel } from "../extensions/meta.ts";
 import {
 	createMetaProviderConfig,
 	loginMeta,
@@ -23,7 +24,16 @@ const LIVE_CATALOG_SNAPSHOT_2026_08_10 = [
 	"muse-spark-1.2-contributor",
 	"muse-spark-1.1",
 ];
-const liveApiKey = process.env.PI_META_LIVE_API_KEY;
+const FALLBACK_CATALOG_IDS = [
+	"muse-spark-1.3",
+	"muse-spark-1.3-contributor",
+	"muse-spark-1.2",
+	"muse-spark-1.2-contributor",
+	"muse-spark-1.1",
+];
+const liveApiKey = (
+	globalThis as { process?: { env?: Record<string, string> } }
+).process?.env?.PI_META_LIVE_API_KEY;
 const liveCatalogTest = liveApiKey ? test : test.skip;
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -76,10 +86,21 @@ describe("Meta OAuth provider", () => {
 	// treated as missing).
 	test("maps known bare catalog entries to complete bundled metadata", () => {
 		const models = toProviderModels({
-			data: LIVE_CATALOG_SNAPSHOT_2026_08_10.map((id) => ({ id })),
+			data: FALLBACK_CATALOG_IDS.map((id) => ({ id })),
 		});
 
 		expect(models).toEqual(createMetaProviderConfig().models ?? []);
+	});
+
+	test("1.3 standard maps thinking max; contributor does not", () => {
+		const byId: Record<string, MetaProviderModel> = Object.fromEntries(
+			(createMetaProviderConfig().models ?? []).map((model: MetaProviderModel) => [
+				model.id,
+				model,
+			]),
+		);
+		expect(byId["muse-spark-1.3"]?.thinkingLevelMap?.max).toBe("max");
+		expect(byId["muse-spark-1.3-contributor"]?.thinkingLevelMap?.max).toBe(null);
 	});
 
 	test("maps unknown IDs with incomplete metadata to fallback defaults", () => {
@@ -164,7 +185,9 @@ describe("Meta OAuth provider", () => {
 
 	test("bundled fallbacks cover the 2026-08-10 live catalog snapshot", () => {
 		const fallbackIDs = new Set(
-			(createMetaProviderConfig().models ?? []).map((model) => model.id),
+			(createMetaProviderConfig().models ?? []).map(
+				(model: MetaProviderModel) => model.id,
+			),
 		);
 
 		for (const id of LIVE_CATALOG_SNAPSHOT_2026_08_10) {
@@ -439,7 +462,9 @@ describe("Meta OAuth provider", () => {
 			typeof entry.id === "string" && entry.id ? [entry.id] : [],
 		);
 		const fallbackIDs = new Set(
-			(createMetaProviderConfig().models ?? []).map((model) => model.id),
+			(createMetaProviderConfig().models ?? []).map(
+				(model: MetaProviderModel) => model.id,
+			),
 		);
 
 		expect(liveIDs).not.toHaveLength(0);
@@ -451,8 +476,8 @@ describe("Meta OAuth provider", () => {
 
 		expect(models).not.toHaveLength(0);
 		expect(
-			models.every((model) => {
-				const compat = model.compat;
+			models.every((model: MetaProviderModel) => {
+				const compat = model.compat as { supportsToolSearch?: boolean } | undefined;
 				return (
 					compat !== undefined &&
 					"supportsToolSearch" in compat &&

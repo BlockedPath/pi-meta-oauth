@@ -2,7 +2,7 @@
 name: extension-release
 description: Preps a pi-meta-oauth release: typecheck, tests, shipped-artifact checks, version/README consistency
 aliases: release, packager
-model: meta/muse-spark-1.2
+model: meta/muse-spark-1.3
 thinking: medium
 tools: bash, read, edit, write, ls, grep, find
 systemPromptMode: replace
