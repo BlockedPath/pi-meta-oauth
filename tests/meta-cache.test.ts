@@ -146,10 +146,13 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		).toBe(50);
 	});
 
-	test("keeps off/max unmapped so Meta never receives reasoning.effort none by default", () => {
+	test("keeps off unmapped so Meta never receives reasoning.effort none by default", () => {
 		for (const model of fallbackModels()) {
 			expect(model.thinkingLevelMap?.off).toBeNull();
-			expect(model.thinkingLevelMap?.max).toBeNull();
+			// 1.3 standard is the only Spark that maps thinking `max` → `max`.
+			expect(model.thinkingLevelMap?.max).toBe(
+				model.id === "muse-spark-1.3" ? "max" : null,
+			);
 		}
 		const catalogued = toProviderModels({
 			data: [
@@ -169,9 +172,9 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		});
 	});
 
-	test("advertises only native text and image inputs", () => {
+	test("advertises text/image plus video/audio inputs on fallbacks", () => {
 		for (const model of fallbackModels()) {
-			expect(model.input).toEqual(["text", "image"]);
+			expect(model.input).toEqual(["text", "image", "video", "audio"]);
 		}
 		expect(
 			toProviderModels({
@@ -303,7 +306,6 @@ describe("Meta Responses cache and reasoning contracts", () => {
 			prompt_cache_retention: "24h",
 		});
 	});
-
 });
 
 function liveCachePrefix(): string {

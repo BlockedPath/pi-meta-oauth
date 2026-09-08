@@ -393,7 +393,8 @@ export function toProviderModels(
 			medium: variants.medium?.reasoningEffort ?? "medium",
 			high: variants.high?.reasoningEffort ?? "high",
 			xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
-			max: null,
+			max:
+				variants.max?.reasoningEffort ?? fallback?.thinkingLevelMap?.max ?? null,
 		};
 		return [
 			{

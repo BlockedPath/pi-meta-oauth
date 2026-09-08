@@ -4,6 +4,7 @@ import type {
 	ModelsStoreEntry,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
+import type { MetaProviderModel } from "../extensions/meta.ts";
 import {
 	createMetaProviderConfig,
 	loginMeta,
@@ -92,8 +93,8 @@ describe("Meta OAuth provider", () => {
 	});
 
 	test("1.3 standard maps thinking max; contributor does not", () => {
-		const byId = Object.fromEntries(
-			(createMetaProviderConfig().models ?? []).map((model: { id: string }) => [
+		const byId: Record<string, MetaProviderModel> = Object.fromEntries(
+			(createMetaProviderConfig().models ?? []).map((model: MetaProviderModel) => [
 				model.id,
 				model,
 			]),
@@ -185,7 +186,7 @@ describe("Meta OAuth provider", () => {
 	test("bundled fallbacks cover the 2026-08-10 live catalog snapshot", () => {
 		const fallbackIDs = new Set(
 			(createMetaProviderConfig().models ?? []).map(
-				(model: { id: string }) => model.id,
+				(model: MetaProviderModel) => model.id,
 			),
 		);
 
@@ -462,7 +463,7 @@ describe("Meta OAuth provider", () => {
 		);
 		const fallbackIDs = new Set(
 			(createMetaProviderConfig().models ?? []).map(
-				(model: { id: string }) => model.id,
+				(model: MetaProviderModel) => model.id,
 			),
 		);
 
@@ -475,8 +476,8 @@ describe("Meta OAuth provider", () => {
 
 		expect(models).not.toHaveLength(0);
 		expect(
-			models.every((model: { compat?: { supportsToolSearch?: boolean } }) => {
-				const compat = model.compat;
+			models.every((model: MetaProviderModel) => {
+				const compat = model.compat as { supportsToolSearch?: boolean } | undefined;
 				return (
 					compat !== undefined &&
 					"supportsToolSearch" in compat &&
