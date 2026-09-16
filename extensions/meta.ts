@@ -601,6 +601,95 @@ export function metaFallbackCost(
 /** Meta prompt-cache opt-in. Measured 0% hits on /chat/completions vs 93–99% on /responses with 24h. */
 export const META_PROMPT_CACHE_RETENTION = "24h";
 
+const ENCRYPTED_REASONING_INCLUDE = "reasoning.encrypted_content";
+const PROBE_RETRY_MS = 5 * 60 * 1000;
+
+/**
+ * Keys minted through /muse-code/key are not always entitled to encrypted
+ * reasoning replay (Meta answers HTTP 400 "reasoning `encrypted_content`
+ * was not issued to this caller" when they aren't). Entitlement can change
+ * between minted keys, so probe once per key per process instead of
+ * hard-coding a decision: requests never 400 and reasoning continuity is
+ * kept whenever the key allows it.
+ */
+interface EntitlementCache {
+	keyHash?: string;
+	known?: boolean;
+	lastAttemptAt: number;
+}
+const entitlementCache: EntitlementCache = { lastAttemptAt: 0 };
+
+function apiKeyHash(key: string): string {
+	// Non-cryptographic FNV-1a; only used to key the in-process probe cache.
+	let hash = 2166136261;
+	for (let i = 0; i < key.length; i++) {
+		hash ^= key.charCodeAt(i);
+		hash = Math.imul(hash, 16777619);
+	}
+	return (hash >>> 0).toString(16);
+}
+
+/**
+ * Probe whether the given API key can request reasoning.encrypted_content.
+ * Returns true (200), false (Meta rejects the include), or undefined when
+ * the probe was inconclusive (transient error) and must be retried later.
+ */
+export async function probeEncryptedReasoningEntitlement(
+	apiKey: string,
+	fetchImpl: Fetch = fetch,
+): Promise<boolean | undefined> {
+	try {
+		const response = await fetchImpl(`${META_API_BASE_URL}/responses`, {
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${apiKey}`,
+				"Content-Type": "application/json",
+				"x-api-version": "1.0.0",
+			},
+			body: JSON.stringify({
+				model: "muse-spark-1.3",
+				input: "Answer with the single letter: a",
+				include: [ENCRYPTED_REASONING_INCLUDE],
+				max_output_tokens: 16,
+				store: false,
+			}),
+		});
+		if (response.status === 200) return true;
+		if (response.status === 400) {
+			const text = await response.text();
+			if (text.includes("encrypted_content")) return false;
+		}
+		return undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function scheduleEntitlementProbe(apiKey: string): void {
+	const hash = apiKeyHash(apiKey);
+	if (
+		entitlementCache.keyHash === hash &&
+		entitlementCache.known !== undefined
+	) {
+		return;
+	}
+	if (Date.now() - entitlementCache.lastAttemptAt < PROBE_RETRY_MS) return;
+	entitlementCache.lastAttemptAt = Date.now();
+	void probeEncryptedReasoningEntitlement(apiKey).then((known) => {
+		if (known !== undefined) {
+			entitlementCache.keyHash = hash;
+			entitlementCache.known = known;
+		}
+	});
+}
+
+function keepEncryptedReasoningFor(apiKey: string | undefined): boolean {
+	if (!apiKey) return false;
+	if (entitlementCache.keyHash !== apiKeyHash(apiKey)) return false;
+	return entitlementCache.known === true;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
 		? (value as Record<string, unknown>)
@@ -614,17 +703,17 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  */
 export function applyMetaResponsesCacheHints(
 	payload: unknown,
+	keepEncryptedReasoning = false,
 ): Record<string, unknown> | undefined {
 	const body = asRecord(payload);
 	if (!body) return undefined;
 	if (body.prompt_cache_retention === undefined) {
 		body.prompt_cache_retention = META_PROMPT_CACHE_RETENTION;
 	}
-	// Keys minted through /muse-code/key (the only auth path this provider
-	// supports) are not entitled to encrypted reasoning replay; requesting it
-	// returns HTTP 400 "reasoning `encrypted_content` was not issued to this
-	// caller". Drop the include so responses requests stay valid.
-	if (Array.isArray(body.include)) {
+	// Drop the encrypted-reasoning include unless the key was probed and
+	// found entitled: unentitled keys get a fatal HTTP 400 for it (see
+	// probeEncryptedReasoningEntitlement). Other include entries survive.
+	if (!keepEncryptedReasoning && Array.isArray(body.include)) {
 		const include = body.include.filter(
 			(item) => item !== "reasoning.encrypted_content",
 		);
@@ -675,8 +764,19 @@ export default function metaOAuthProvider(pi: ExtensionAPI): void {
 		process.env["MODEL_API_KEY"] = process.env[META_ENV_VAR];
 	}
 	pi.registerProvider(META_PROVIDER_ID, createMetaProviderConfig());
-	pi.on("before_provider_request", (event, ctx) => {
+	pi.on("before_provider_request", async (event, ctx) => {
 		if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
-		return applyMetaResponsesCacheHints(event.payload);
+		let apiKey: string | undefined;
+		try {
+			apiKey = (await ctx.modelRegistry?.getProviderAuth(META_PROVIDER_ID))
+				?.auth?.apiKey;
+		} catch {
+			apiKey = undefined;
+		}
+		if (apiKey) scheduleEntitlementProbe(apiKey);
+		return applyMetaResponsesCacheHints(
+			event.payload,
+			keepEncryptedReasoningFor(apiKey),
+		);
 	});
 }
