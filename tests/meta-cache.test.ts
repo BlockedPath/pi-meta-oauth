@@ -225,6 +225,23 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		});
 	});
 
+	test("strips reasoning.encrypted_content include because OAuth-minted keys are not entitled", () => {
+		expect(
+			applyMetaResponsesCacheHints({
+				include: ["reasoning.encrypted_content"],
+				reasoning: { effort: "high", summary: "auto" },
+			}),
+		).toEqual({
+			prompt_cache_retention: "24h",
+			reasoning: { effort: "high", summary: "auto" },
+		});
+		expect(
+			applyMetaResponsesCacheHints({
+				include: ["reasoning.encrypted_content", "something.else"],
+			}),
+		).toMatchObject({ include: ["something.else"] });
+	});
+
 	test("pi-ai hits /v1/responses, not /chat/completions", async () => {
 		const { url, payload } = await captureResponsesRequest();
 		expect(url).toContain("https://api.meta.ai/v1/responses");

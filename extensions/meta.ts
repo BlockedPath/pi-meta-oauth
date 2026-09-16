@@ -620,6 +620,17 @@ export function applyMetaResponsesCacheHints(
 	if (body.prompt_cache_retention === undefined) {
 		body.prompt_cache_retention = META_PROMPT_CACHE_RETENTION;
 	}
+	// Keys minted through /muse-code/key (the only auth path this provider
+	// supports) are not entitled to encrypted reasoning replay; requesting it
+	// returns HTTP 400 "reasoning `encrypted_content` was not issued to this
+	// caller". Drop the include so responses requests stay valid.
+	if (Array.isArray(body.include)) {
+		const include = body.include.filter(
+			(item) => item !== "reasoning.encrypted_content",
+		);
+		if (include.length === 0) delete body.include;
+		else body.include = include;
+	}
 	const reasoning = asRecord(body.reasoning);
 	if (
 		reasoning &&
