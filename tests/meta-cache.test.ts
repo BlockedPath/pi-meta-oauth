@@ -9,6 +9,7 @@ import {
 	META_API_BASE_URL,
 	META_PROMPT_CACHE_RETENTION,
 	META_PROVIDER_ID,
+	probeEncryptedReasoningEntitlement,
 	toProviderModels,
 } from "../extensions/meta.ts";
 import metaOAuthProvider from "../extensions/meta.ts";
@@ -225,6 +226,67 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		});
 	});
 
+	test("strips reasoning.encrypted_content include when the key is not entitled", () => {
+		expect(
+			applyMetaResponsesCacheHints({
+				include: ["reasoning.encrypted_content"],
+				reasoning: { effort: "high", summary: "auto" },
+			}),
+		).toEqual({
+			prompt_cache_retention: "24h",
+			reasoning: { effort: "high", summary: "auto" },
+		});
+		expect(
+			applyMetaResponsesCacheHints({
+				include: ["reasoning.encrypted_content", "something.else"],
+			}),
+		).toMatchObject({ include: ["something.else"] });
+	});
+
+	test("keeps reasoning.encrypted_content include when the key is entitled", () => {
+		expect(
+			applyMetaResponsesCacheHints(
+				{
+					include: ["reasoning.encrypted_content"],
+					reasoning: { effort: "high", summary: "auto" },
+				},
+				true,
+			),
+		).toEqual({
+			prompt_cache_retention: "24h",
+			include: ["reasoning.encrypted_content"],
+			reasoning: { effort: "high", summary: "auto" },
+		});
+	});
+
+	test("probes encrypted-reasoning entitlement: 200 means entitled", async () => {
+		const known = await probeEncryptedReasoningEntitlement(
+			"test-key",
+			(async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+		);
+		expect(known).toBe(true);
+	});
+
+	test("probe reports not entitled when Meta rejects encrypted_content", async () => {
+		const known = await probeEncryptedReasoningEntitlement(
+			"test-key",
+			(async () =>
+				new Response(
+					'{"type":"invalid_request_error","message":"reasoning `encrypted_content` was not issued to this caller"}',
+					{ status: 400 },
+				)) as unknown as typeof fetch,
+		);
+		expect(known).toBe(false);
+	});
+
+	test("probe is inconclusive on transient errors", async () => {
+		const known = await probeEncryptedReasoningEntitlement(
+			"test-key",
+			(async () => new Response("{}", { status: 502 })) as unknown as typeof fetch,
+		);
+		expect(known).toBeUndefined();
+	});
+
 	test("pi-ai hits /v1/responses, not /chat/completions", async () => {
 		const { url, payload } = await captureResponsesRequest();
 		expect(url).toContain("https://api.meta.ai/v1/responses");
@@ -293,13 +355,13 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		} as unknown as ExtensionAPI);
 		expect(handler).toBeDefined();
 
-		const other = handler?.(
+		const other = await handler?.(
 			{ payload: { model: "gpt" } },
 			{ model: { provider: "openai" } },
 		);
 		expect(other).toBeUndefined();
 
-		const meta = handler?.(
+		const meta = await handler?.(
 			{ payload: { model: "muse-spark-1.2" } },
 			{ model: { provider: META_PROVIDER_ID } },
 		);
