@@ -88,7 +88,7 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			medium: "medium",
 			high: "high",
 			xhigh: "xhigh",
-			max: null,
+			max: "max",
 		},
 		input: ["text", "image"],
 		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
@@ -422,7 +422,7 @@ export function toProviderModels(
 			medium: variants.medium?.reasoningEffort ?? "medium",
 			high: variants.high?.reasoningEffort ?? "high",
 			xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
-			max: null,
+			max: variants.max?.reasoningEffort ?? fallback?.thinkingLevelMap?.max ?? null,
 		};
 		return [
 			{

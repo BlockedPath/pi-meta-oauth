@@ -42,7 +42,7 @@ The access key is re-minted daily.
 
 ## Models
 
-Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh`.
+Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh` (`muse-spark-1.3` additionally supports `max`).
 
 | id | pricing (input/output/cached) $/M |
 | --- | --- |
