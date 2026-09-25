@@ -68,15 +68,20 @@ describe("Meta OAuth provider", () => {
 	});
 
 	// Live-probed 2026-09-06: POST /v1/responses accepts reasoning.effort
-	// "max" only on muse-spark-1.3; every other Muse model 400s with
-	// "Supported values: [minimal, low, medium, high, xhigh]". The bare
-	// catalog carries no variants block, so known IDs inherit max support
-	// from FALLBACK_MODELS while server-advertised variants still win.
+	// "max" on muse-spark-1.3 with any User-Agent. Live-probed 2026-09-25:
+	// muse-spark-1.3-contributor accepts "max" only when the request
+	// carries the Muse User-Agent fingerprint (400 without it, 200 with
+	// it); every other Muse model 400s with "Supported values: [minimal,
+	// low, medium, high, xhigh]". The bare catalog carries no variants
+	// block, so known IDs inherit max support from FALLBACK_MODELS while
+	// server-advertised variants still win.
 	test("exposes max effort only where the model supports it", () => {
 		const models = toProviderModels({
 			data: [
 				{ id: "muse-spark-1.3" },
+				{ id: "muse-spark-1.3-contributor" },
 				{ id: "muse-spark-1.2" },
+				{ id: "muse-spark-1.2-contributor" },
 				{
 					id: "muse-spark-future",
 					metadata: {
@@ -86,16 +91,28 @@ describe("Meta OAuth provider", () => {
 			],
 		});
 
-		expect(models).toHaveLength(3);
+		expect(models).toHaveLength(5);
 		const byId = Object.fromEntries(models.map((m) => [m.id, m]));
 		expect(byId["muse-spark-1.3"]?.thinkingLevelMap).toMatchObject({
 			xhigh: "xhigh",
 			max: "max",
 		});
+		expect(byId["muse-spark-1.3-contributor"]?.thinkingLevelMap).toMatchObject(
+			{
+				xhigh: "xhigh",
+				max: "max",
+			},
+		);
 		expect(byId["muse-spark-1.2"]?.thinkingLevelMap).toMatchObject({
 			xhigh: "xhigh",
 			max: null,
 		});
+		expect(byId["muse-spark-1.2-contributor"]?.thinkingLevelMap).toMatchObject(
+			{
+				xhigh: "xhigh",
+				max: null,
+			},
+		);
 		expect(byId["muse-spark-future"]?.thinkingLevelMap).toMatchObject({
 			max: "ultra",
 		});
@@ -494,6 +511,25 @@ describe("Meta OAuth provider", () => {
 				);
 			}),
 		).toBe(true);
+	});
+
+	test("accepts both API-key and Muse Code login credentials", () => {
+		const config = createMetaProviderConfig();
+
+		// API-key users: Pi interpolates $META_API_KEY (or the MODEL_API_KEY
+		// shim set at extension load) with no login required.
+		expect(config.apiKey).toBe("$META_API_KEY");
+		// Muse Code login: /login meta runs the device flow, then mints a
+		// Model API key from the identity token and rotates it daily.
+		expect(config.oauth?.login).toBe(loginMeta);
+		expect(config.oauth?.refreshToken).toBe(refreshMetaToken);
+		expect(
+			config.oauth?.getApiKey?.({
+				refresh: "identity-token",
+				access: "minted-key",
+				expires: Date.now(),
+			}),
+		).toBe("minted-key");
 	});
 
 	test("runs device login, polls, and mints a Model API key", async () => {

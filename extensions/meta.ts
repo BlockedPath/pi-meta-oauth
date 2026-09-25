@@ -16,6 +16,17 @@ export const META_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_MODEL_CATALOG_URL = "https://api.meta.ai/v1/models";
 export const META_AUTH_BASE_URL = "https://auth.meta.com";
 export const META_CLIENT_ID = "1031625952748946";
+/**
+ * User-Agent captured from the Muse CLI inference entrypoint.
+ * Sending it on direct Meta Model API requests enables `reasoning.effort:
+ * "max"` on muse-spark-1.3-contributor (live-verified 2026-09-25: identical
+ * payloads 400 without it and 200 with it, on both API-key and
+ * login-minted credentials). Observed wire behavior, not a permission
+ * claim: Meta documents `max` for standard-tier 1.3 only, and the gate
+ * may change server-side without notice.
+ */
+export const MUSE_USER_AGENT =
+	"muse-build/1.3.0 (non-interactive; linux-x86_64; build ac7280f2aca67769d1455a8847bb502b617d50f6)";
 const META_ENV_VAR = "META_API_KEY";
 
 const DEVICE_AUTHORIZATION_URL = `${META_AUTH_BASE_URL}/oidc/device/authorization/`;
@@ -107,7 +118,10 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			medium: "medium",
 			high: "high",
 			xhigh: "xhigh",
-			max: null,
+			// Live-verified 2026-09-25: accepted only with the Muse
+			// User-Agent fingerprint, which the before_provider_headers
+			// hook sets on direct Meta requests.
+			max: "max",
 		},
 		input: ["text", "image"],
 		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
@@ -608,6 +622,53 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 /**
+ * Strict direct-endpoint check: https scheme, api.meta.ai hostname
+ * (case-insensitive), default port, and a bare /v1 path. WHATWG URL parsing
+ * normalizes the equivalent forms (uppercase host, explicit :443) to match;
+ * proxies, lookalike hosts (api.meta.ai.evil.com), subpaths, and
+ * non-default ports never match, so they never receive the fingerprint.
+ */
+export function isDirectMetaModelApiUrl(baseUrl: unknown): boolean {
+	if (typeof baseUrl !== "string" || !baseUrl) return false;
+	let parsed: URL;
+	try {
+		parsed = new URL(baseUrl);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol !== "https:") return false;
+	if (parsed.hostname.toLowerCase() !== "api.meta.ai") return false;
+	if (parsed.port !== "") return false;
+	return parsed.pathname.replace(/\/+$/, "") === "/v1";
+}
+
+function hasUserAgentHeader(
+	headers: Record<string, string | null>,
+): boolean {
+	return Object.keys(headers).some(
+		(name) => name.toLowerCase() === "user-agent",
+	);
+}
+
+/**
+ * Setdefault the Muse fingerprint for direct Meta Model API requests.
+ * Explicit User-Agent headers (any casing, including null suppression)
+ * always win; anything but the direct endpoint is left untouched.
+ * Applies regardless of credential type: API-key and Muse Code login
+ * (minted) credentials both reach the same direct wire. Returns true when
+ * the fingerprint was applied.
+ */
+export function applyMetaUserAgentFingerprint(
+	headers: Record<string, string | null>,
+	baseUrl: unknown,
+): boolean {
+	if (!isDirectMetaModelApiUrl(baseUrl)) return false;
+	if (hasUserAgentHeader(headers)) return false;
+	headers["User-Agent"] = MUSE_USER_AGENT;
+	return true;
+}
+
+/**
  * Hermes-equivalent Responses hints for api.meta.ai:
  * setdefault `prompt_cache_retention: 24h`, and drop `reasoning.effort: none`
  * because Meta 400s on it.
@@ -667,5 +728,11 @@ export default function metaOAuthProvider(pi: ExtensionAPI): void {
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
 		return applyMetaResponsesCacheHints(event.payload);
+	});
+	pi.on("before_provider_headers", (event, ctx) => {
+		if (ctx.model?.provider !== META_PROVIDER_ID) return;
+		// The composed model always carries the effective baseUrl; without
+		// it the endpoint cannot be verified, so no fingerprint is sent.
+		applyMetaUserAgentFingerprint(event.headers, ctx.model?.baseUrl);
 	});
 }

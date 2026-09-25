@@ -6,10 +6,13 @@ import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	applyMetaResponsesCacheHints,
+	applyMetaUserAgentFingerprint,
 	createMetaProviderConfig,
+	isDirectMetaModelApiUrl,
 	META_API_BASE_URL,
 	META_PROMPT_CACHE_RETENTION,
 	META_PROVIDER_ID,
+	MUSE_USER_AGENT,
 	toProviderModels,
 } from "../extensions/meta.ts";
 import metaOAuthProvider from "../extensions/meta.ts";
@@ -161,8 +164,13 @@ describe("Meta Responses cache and reasoning contracts", () => {
 	test("keeps off/max unmapped so Meta never receives reasoning.effort none by default", () => {
 		for (const model of fallbackModels()) {
 			expect(model.thinkingLevelMap?.off).toBeNull();
-			if (model.id === "muse-spark-1.3") {
-				// Live-probed 2026-09-06: only muse-spark-1.3 accepts effort "max".
+			if (
+				model.id === "muse-spark-1.3" ||
+				model.id === "muse-spark-1.3-contributor"
+			) {
+				// Live-probed 2026-09-06: muse-spark-1.3 accepts effort "max".
+				// Live-probed 2026-09-25: 1.3-contributor accepts it only with
+				// the Muse User-Agent fingerprint the headers hook sends.
 				expect(model.thinkingLevelMap?.max).toBe("max");
 			} else {
 				expect(model.thinkingLevelMap?.max).toBeNull();
@@ -323,6 +331,110 @@ describe("Meta Responses cache and reasoning contracts", () => {
 
 });
 
+describe("Meta User-Agent fingerprint", () => {
+	test("matches only the direct Meta Model API endpoint", () => {
+		for (const baseUrl of [
+			"https://api.meta.ai/v1",
+			"https://api.meta.ai/v1/",
+			"https://API.META.AI/v1",
+			"https://api.meta.ai:443/v1",
+		]) {
+			expect(isDirectMetaModelApiUrl(baseUrl)).toBe(true);
+		}
+		for (const baseUrl of [
+			"https://proxy.example/v1",
+			"https://api.meta.ai.evil.com/v1",
+			"https://evil.com/api.meta.ai/v1",
+			"https://api.meta.ai:8443/v1",
+			"https://api.meta.ai/v1/models",
+			"https://api.meta.ai",
+			"http://api.meta.ai/v1",
+			"not a url",
+			"",
+			undefined,
+			null,
+		]) {
+			expect(isDirectMetaModelApiUrl(baseUrl)).toBe(false);
+		}
+	});
+
+	test("setdefaults the fingerprint and preserves explicit headers", () => {
+		const fresh: Record<string, string | null> = {};
+		expect(applyMetaUserAgentFingerprint(fresh, META_API_BASE_URL)).toBe(
+			true,
+		);
+		expect(fresh["User-Agent"]).toBe(MUSE_USER_AGENT);
+
+		for (const headers of [
+			{ "User-Agent": "custom-muse-client/1.0" },
+			{ "user-agent": "custom-muse-client/1.0" },
+			{ "User-Agent": null },
+		] as Record<string, string | null>[]) {
+			const copy = { ...headers };
+			expect(applyMetaUserAgentFingerprint(copy, META_API_BASE_URL)).toBe(
+				false,
+			);
+			expect(copy).toEqual(headers);
+		}
+
+		const proxied: Record<string, string | null> = {};
+		expect(
+			applyMetaUserAgentFingerprint(proxied, "https://proxy.example/v1"),
+		).toBe(false);
+		expect(proxied).toEqual({});
+	});
+
+	test("registers a Meta-only before_provider_headers hook that fingerprints direct requests", async () => {
+		type HeadersHandler = (
+			event: { headers: Record<string, string | null> },
+			ctx: { model?: { provider: string; baseUrl?: string } },
+		) => unknown;
+		let handler: HeadersHandler | undefined;
+		metaOAuthProvider({
+			registerProvider() {},
+			on(event: string, next: unknown) {
+				if (event === "before_provider_headers") {
+					handler = next as HeadersHandler;
+				}
+			},
+		} as unknown as ExtensionAPI);
+		expect(handler).toBeDefined();
+
+		const otherHeaders: Record<string, string | null> = {};
+		await handler?.(
+			{ headers: otherHeaders },
+			{ model: { provider: "openai", baseUrl: META_API_BASE_URL } },
+		);
+		expect(otherHeaders).toEqual({});
+
+		const directHeaders: Record<string, string | null> = {};
+		await handler?.(
+			{ headers: directHeaders },
+			{ model: { provider: META_PROVIDER_ID, baseUrl: META_API_BASE_URL } },
+		);
+		expect(directHeaders["User-Agent"]).toBe(MUSE_USER_AGENT);
+
+		const proxiedHeaders: Record<string, string | null> = {};
+		await handler?.(
+			{ headers: proxiedHeaders },
+			{
+				model: {
+					provider: META_PROVIDER_ID,
+					baseUrl: "https://proxy.example/v1",
+				},
+			},
+		);
+		expect(proxiedHeaders).toEqual({});
+
+		const unverifiedHeaders: Record<string, string | null> = {};
+		await handler?.(
+			{ headers: unverifiedHeaders },
+			{ model: { provider: META_PROVIDER_ID } },
+		);
+		expect(unverifiedHeaders).toEqual({});
+	});
+});
+
 function liveCachePrefix(): string {
 	const lines: string[] = [
 		"This block is a fixed Muse prompt-cache probe. Keep it byte-identical.",
@@ -420,6 +532,63 @@ describe("Meta live prompt-cache probe", () => {
 				cacheRead,
 				`first ${usageSummary(first)}; second ${usageSummary(second)}`,
 			).toBeGreaterThan(0);
+		},
+		120_000,
+	);
+});
+
+const liveFingerprintTest = liveApiKey ? test : test.skip;
+
+async function callLiveContributorMax(
+	apiKey: string,
+	userAgent: string | undefined,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+	const headers: Record<string, string> = {
+		Accept: "application/json",
+		Authorization: `Bearer ${apiKey}`,
+		"Content-Type": "application/json",
+		"x-api-version": "1.0.0",
+	};
+	if (userAgent !== undefined) headers["User-Agent"] = userAgent;
+	const response = await fetch(`${META_API_BASE_URL}/responses`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({
+			model: "muse-spark-1.3-contributor",
+			input: "Reply with the single word pong.",
+			stream: false,
+			store: false,
+			reasoning: { effort: "max", summary: "auto" },
+			max_output_tokens: 32,
+		}),
+	});
+	return {
+		status: response.status,
+		body: (await response.json()) as Record<string, unknown>,
+	};
+}
+
+describe("Meta live fingerprint probe", () => {
+	liveFingerprintTest(
+		"contributor max needs the Muse fingerprint and nothing else changes",
+		async () => {
+			if (!liveApiKey) throw new Error("PI_META_LIVE_API_KEY is required");
+			// Without the fingerprint the identical payload is rejected.
+			const bare = await callLiveContributorMax(liveApiKey, undefined);
+			expect(bare.status).toBe(400);
+
+			// With it, the same payload is accepted and echoes effort "max".
+			// The tiny output budget may truncate visible text; only the
+			// acceptance and the echoed effort are asserted.
+			const fingerprinted = await callLiveContributorMax(
+				liveApiKey,
+				MUSE_USER_AGENT,
+			);
+			expect(fingerprinted.status).toBe(200);
+			expect(fingerprinted.body).toMatchObject({
+				model: "muse-spark-1.3-contributor",
+				reasoning: { effort: "max" },
+			});
 		},
 		120_000,
 	);
