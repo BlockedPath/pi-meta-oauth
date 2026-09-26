@@ -16,6 +16,29 @@ export const META_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_MODEL_CATALOG_URL = "https://api.meta.ai/v1/models";
 export const META_AUTH_BASE_URL = "https://auth.meta.com";
 export const META_CLIENT_ID = "1031625952748946";
+/**
+ * User-Agent captured from the Muse CLI inference entrypoint, kept
+ * byte-for-byte (including the linux-x86_64 platform) because it is a
+ * captured fingerprint: variants for other platforms are unverified.
+ *
+ * Sending it on direct Meta Model API requests enables `reasoning.effort:
+ * "max"` on muse-spark-1.3-contributor (live-verified 2026-09-25 on
+ * login-minted credentials: identical payloads 400 without it and 200
+ * with it; API-key parity reported in oh-my-pi#12199). Observed wire
+ * behavior, not a permission claim: Meta documents `max` for standard-tier
+ * 1.3 only, and the gate may change server-side without notice.
+ *
+ * Off by default. It impersonates Meta's first-party client, so users opt
+ * in with {@link MUSE_USER_AGENT_ENV_VAR}; see {@link isMuseUserAgentEnabled}.
+ */
+export const MUSE_USER_AGENT =
+	"muse-build/1.3.0 (non-interactive; linux-x86_64; build ac7280f2aca67769d1455a8847bb502b617d50f6)";
+/** Set to `1`/`true`/`yes` to send {@link MUSE_USER_AGENT} and expose Contributor `max`. */
+export const MUSE_USER_AGENT_ENV_VAR = "META_MUSE_USER_AGENT";
+/** Models whose `max` effort Meta accepts only with the Muse fingerprint. */
+const MUSE_USER_AGENT_MODEL_IDS: ReadonlySet<string> = new Set([
+	"muse-spark-1.3-contributor",
+]);
 const META_ENV_VAR = "META_API_KEY";
 
 const DEVICE_AUTHORIZATION_URL = `${META_AUTH_BASE_URL}/oidc/device/authorization/`;
@@ -107,6 +130,9 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 			medium: "medium",
 			high: "high",
 			xhigh: "xhigh",
+			// Accepted only with the Muse User-Agent fingerprint (live-verified
+			// 2026-09-25). gateMuseMaxEffort() maps this to "max" when
+			// META_MUSE_USER_AGENT opts in; otherwise it stays unexposed.
 			max: null,
 		},
 		input: ["text", "image"],
@@ -173,6 +199,37 @@ const FALLBACK_MODELS: MetaProviderModel[] = [
 		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
 	},
 ];
+
+type MetaEnv = Record<string, string | undefined>;
+
+/** True when the user opted in to the Muse User-Agent fingerprint. */
+export function isMuseUserAgentEnabled(env: MetaEnv = process.env): boolean {
+	const value = env[MUSE_USER_AGENT_ENV_VAR]?.trim().toLowerCase();
+	return value === "1" || value === "true" || value === "yes";
+}
+
+/**
+ * Expose `max` on fingerprint-gated models only when the fingerprint is
+ * enabled, so users who have not opted in are never offered a level that
+ * 400s. Any other explicit `max` mapping (e.g. a future server-advertised
+ * effort name) passes through unchanged.
+ */
+function gateMuseMaxEffort(
+	model: MetaProviderModel,
+	env: MetaEnv = process.env,
+): MetaProviderModel {
+	const map = model.thinkingLevelMap;
+	if (!map || !MUSE_USER_AGENT_MODEL_IDS.has(model.id)) return model;
+	if (map.max != null && map.max !== "max") return model;
+	return {
+		...model,
+		thinkingLevelMap: { ...map, max: isMuseUserAgentEnabled(env) ? "max" : null },
+	};
+}
+
+function fallbackModels(): MetaProviderModel[] {
+	return FALLBACK_MODELS.map((model) => gateMuseMaxEffort(model));
+}
 
 function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -412,7 +469,8 @@ export function toProviderModels(
 		if (typeof entry.id !== "string" || !entry.id) return [];
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
-		const fallback = FALLBACK_MODELS.find((model) => model.id === entry.id);
+		// Gated fallbacks: a server-advertised variants.max still wins below.
+		const fallback = fallbackModels().find((model) => model.id === entry.id);
 		const catalogName = metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
 		const thinkingLevelMap: NonNullable<MetaProviderModel["thinkingLevelMap"]> = {
@@ -476,8 +534,10 @@ function providerModelsFromStore(
 	return (entry?.models ?? []).flatMap((model: Model<Api>) => {
 		if (model.provider !== META_PROVIDER_ID || model.api !== "openai-responses")
 			return [];
+		// Re-gate on restore: a catalog cached while the fingerprint was enabled
+		// must not keep offering Contributor `max` after the user opts out.
 		return [
-			{
+			gateMuseMaxEffort({
 				id: model.id,
 				name: model.name,
 				api: model.api,
@@ -490,7 +550,7 @@ function providerModelsFromStore(
 				maxTokens: model.maxTokens,
 				headers: model.headers,
 				compat: model.compat as MetaProviderModel["compat"],
-			},
+			}),
 		];
 	});
 }
@@ -540,7 +600,7 @@ export async function refreshMetaModels(
 	const compatibleContext = context as unknown as CompatibleRefreshContext;
 	if (!context.allowNetwork || context.signal?.aborted) {
 		const cached = await cachedMetaModels(compatibleContext);
-		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+		return cached.length > 0 ? cached : fallbackModels();
 	}
 	const apiKey =
 		context.credential?.type === "oauth"
@@ -550,7 +610,7 @@ export async function refreshMetaModels(
 				: undefined;
 	if (!apiKey) {
 		const cached = await cachedMetaModels(compatibleContext);
-		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+		return cached.length > 0 ? cached : fallbackModels();
 	}
 
 	try {
@@ -572,7 +632,7 @@ export async function refreshMetaModels(
 		const models = toProviderModels(body);
 		if (models.length === 0) {
 			const cached = await cachedMetaModels(compatibleContext);
-			return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+			return cached.length > 0 ? cached : fallbackModels();
 		}
 		if (!context.signal?.aborted) {
 			try {
@@ -588,7 +648,7 @@ export async function refreshMetaModels(
 	} catch (error) {
 		if (context.signal?.aborted) throw error;
 		const cached = await cachedMetaModels(compatibleContext);
-		return cached.length > 0 ? cached : [...FALLBACK_MODELS];
+		return cached.length > 0 ? cached : fallbackModels();
 	}
 }
 
@@ -605,6 +665,53 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 	return value !== null && typeof value === "object" && !Array.isArray(value)
 		? (value as Record<string, unknown>)
 		: undefined;
+}
+
+/**
+ * Strict direct-endpoint check: https scheme, api.meta.ai hostname
+ * (case-insensitive), default port, and a bare /v1 path. WHATWG URL parsing
+ * normalizes the equivalent forms (uppercase host, explicit :443) to match;
+ * proxies, lookalike hosts (api.meta.ai.evil.com), subpaths, and
+ * non-default ports never match, so they never receive the fingerprint.
+ */
+export function isDirectMetaModelApiUrl(baseUrl: unknown): boolean {
+	if (typeof baseUrl !== "string" || !baseUrl) return false;
+	let parsed: URL;
+	try {
+		parsed = new URL(baseUrl);
+	} catch {
+		return false;
+	}
+	if (parsed.protocol !== "https:") return false;
+	if (parsed.hostname.toLowerCase() !== "api.meta.ai") return false;
+	if (parsed.port !== "") return false;
+	return parsed.pathname.replace(/\/+$/, "") === "/v1";
+}
+
+function hasUserAgentHeader(
+	headers: Record<string, string | null>,
+): boolean {
+	return Object.keys(headers).some(
+		(name) => name.toLowerCase() === "user-agent",
+	);
+}
+
+/**
+ * Setdefault the Muse fingerprint for direct Meta Model API requests.
+ * Explicit User-Agent headers (any casing, including null suppression)
+ * always win; anything but the direct endpoint is left untouched.
+ * Applies regardless of credential type: API-key and Muse Code login
+ * (minted) credentials both reach the same direct wire. Returns true when
+ * the fingerprint was applied.
+ */
+export function applyMetaUserAgentFingerprint(
+	headers: Record<string, string | null>,
+	baseUrl: unknown,
+): boolean {
+	if (!isDirectMetaModelApiUrl(baseUrl)) return false;
+	if (hasUserAgentHeader(headers)) return false;
+	headers["User-Agent"] = MUSE_USER_AGENT;
+	return true;
 }
 
 /**
@@ -638,7 +745,7 @@ export function createMetaProviderConfig(): ProviderConfig {
 		baseUrl: META_API_BASE_URL,
 		api: "openai-responses",
 		apiKey: "$META_API_KEY",
-		models: [...FALLBACK_MODELS],
+		models: fallbackModels(),
 		refreshModels: refreshMetaModels,
 		oauth: {
 			name: "Meta Model API (browser login)",
@@ -667,5 +774,16 @@ export default function metaOAuthProvider(pi: ExtensionAPI): void {
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
 		return applyMetaResponsesCacheHints(event.payload);
+	});
+	pi.on("before_provider_headers", (event, ctx) => {
+		const model = ctx.model;
+		if (model?.provider !== META_PROVIDER_ID) return;
+		// Opt-in only, and only for models that need it: every other Meta
+		// request keeps Pi's own User-Agent.
+		if (!MUSE_USER_AGENT_MODEL_IDS.has(model.id)) return;
+		if (!isMuseUserAgentEnabled()) return;
+		// The composed model always carries the effective baseUrl; without
+		// it the endpoint cannot be verified, so no fingerprint is sent.
+		applyMetaUserAgentFingerprint(event.headers, model.baseUrl);
 	});
 }

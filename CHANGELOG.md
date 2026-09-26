@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `META_MUSE_USER_AGENT=1` exposes reasoning effort `max` on `muse-spark-1.3-contributor` and sends the captured Muse CLI `User-Agent` on that model's direct `https://api.meta.ai/v1` requests, which Meta requires for Contributor `max`. Off by default. Other models, proxies, and explicit `User-Agent` headers are untouched. This identifies Pi as Meta's first-party client and is unsupported by Meta; see the README warning ([#20](https://github.com/BlockedPath/pi-meta-oauth/pull/20) by [@AdityaVG13](https://github.com/AdityaVG13)).
+
 ### Changed
 
 - Support Pi 0.86 and 0.87: widen the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` peer ranges to `>=0.83.0 <0.88.0` and typecheck/test against 0.87.1. The extension still overrides Pi's built-in `meta` provider on 0.87.1.
