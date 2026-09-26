@@ -60,11 +60,18 @@ Fallback models use a 1,048,576-token context window, up to 256K output tokens, 
 
 ### Contributor `max` (opt-in)
 
-Meta documents reasoning effort `max` for standard-tier `muse-spark-1.3` only. `muse-spark-1.3-contributor` rejects it (HTTP 400) unless the request carries the Muse CLI's `User-Agent` (observed 2026-09-25, same for API-key and `/login meta` credentials). To use it anyway:
+Meta documents reasoning effort `max` for standard-tier `muse-spark-1.3` only. `muse-spark-1.3-contributor` rejects it (HTTP 400) unless the request carries the Muse CLI's `User-Agent` (observed 2026-09-25, same for API-key and `/login meta` credentials). To use it anyway, set `META_MUSE_USER_AGENT=1` (`true` and `yes` also work) in the environment Pi starts from:
 
-```bash
-export META_MUSE_USER_AGENT=1   # also accepts true / yes
-```
+| OS / shell | Enable permanently |
+| --- | --- |
+| macOS (zsh, the default) | `echo 'export META_MUSE_USER_AGENT=1' >> ~/.zshrc` |
+| Linux (bash) | `echo 'export META_MUSE_USER_AGENT=1' >> ~/.bashrc` |
+| fish (any OS) | `set -Ux META_MUSE_USER_AGENT 1` |
+| Windows (PowerShell) | `[Environment]::SetEnvironmentVariable("META_MUSE_USER_AGENT", "1", "User")` |
+
+Then open a **new** terminal and restart Pi. Shells that were already open don't see the change, and long-running terminal apps or multiplexers (e.g. tmux) may need a full restart. On macOS/Linux you can instead run `source ~/.zshrc` (or `~/.bashrc`) in the current shell. For a single run, use `META_MUSE_USER_AGENT=1 pi`. To disable it, remove the line (fish: `set -Ue META_MUSE_USER_AGENT`; Windows: pass `$null` instead of `"1"`) and restart Pi.
+
+The header is the same on every OS. The captured string names `linux-x86_64`, but the platform segment doesn't appear to be checked: it was accepted from Windows (2026-09-26), and oh-my-pi sends the same fixed string on every platform.
 
 With the flag set, the extension exposes `max` on `muse-spark-1.3-contributor` and sends the captured Muse `User-Agent` on that model's requests to `https://api.meta.ai/v1` only. Other models, proxies and custom `baseUrl`s, and any `User-Agent` you set yourself are left untouched. Without the flag, Contributor `max` is hidden and Pi's own `User-Agent` is sent.
 
