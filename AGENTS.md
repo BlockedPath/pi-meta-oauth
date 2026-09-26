@@ -26,3 +26,7 @@ Hermetic OAuth and catalog tests live in `tests/meta.test.ts`.
 Muse Spark on `api.meta.ai` returns no useful cache hits on `/v1/chat/completions`. Keep the provider on `/v1/responses` and preserve `applyMetaResponsesCacheHints()` in the `before_provider_request` hook. It sets `prompt_cache_retention: "24h"` only when the payload has no explicit retention and removes `reasoning` when effort is `"none"` or missing because Meta rejects that shape.
 
 `tests/meta-cache.test.ts` contains hermetic wire-contract coverage plus an optional live cache probe. The live probe resolves a key from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired `meta.access` entry in `~/.pi/agent/auth.json`. It makes real billable requests whenever a credential resolves; do not put a live key in CI.
+
+## Muse User-Agent opt-in
+
+`muse-spark-1.3-contributor` accepts reasoning effort `max` only with the captured Muse CLI `User-Agent` (`MUSE_USER_AGENT`). Keep this strictly opt-in via `META_MUSE_USER_AGENT`: the `before_provider_headers` hook must stay scoped to the Meta provider, the models in `MUSE_USER_AGENT_MODEL_IDS`, and the direct `https://api.meta.ai/v1` endpoint, and it must never override an explicit `User-Agent`. Route every model list (fallbacks, catalog, cached restore) through `gateMuseMaxEffort()` so Contributor `max` is exposed only when opted in. Tests that depend on the flag must use `tests/muse-env.ts` to stay hermetic.

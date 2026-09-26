@@ -13,8 +13,12 @@ import {
 	META_PROMPT_CACHE_RETENTION,
 	META_PROVIDER_ID,
 	MUSE_USER_AGENT,
+	MUSE_USER_AGENT_ENV_VAR,
+	isMuseUserAgentEnabled,
+	refreshMetaModels,
 	toProviderModels,
 } from "../extensions/meta.ts";
+import { withMuseUserAgent } from "./muse-env.ts";
 import metaOAuthProvider from "../extensions/meta.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -161,18 +165,15 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		).toBe(50);
 	});
 
-	test("keeps off/max unmapped so Meta never receives reasoning.effort none by default", () => {
-		for (const model of fallbackModels()) {
+	test("keeps off/max unmapped so Meta never receives reasoning.effort none by default", async () => {
+		const models = await withMuseUserAgent(undefined, fallbackModels);
+		for (const model of models) {
 			expect(model.thinkingLevelMap?.off).toBeNull();
-			if (
-				model.id === "muse-spark-1.3" ||
-				model.id === "muse-spark-1.3-contributor"
-			) {
+			if (model.id === "muse-spark-1.3") {
 				// Live-probed 2026-09-06: muse-spark-1.3 accepts effort "max".
-				// Live-probed 2026-09-25: 1.3-contributor accepts it only with
-				// the Muse User-Agent fingerprint the headers hook sends.
 				expect(model.thinkingLevelMap?.max).toBe("max");
 			} else {
+				// 1.3-contributor needs the opt-in Muse fingerprint for "max".
 				expect(model.thinkingLevelMap?.max).toBeNull();
 			}
 		}
@@ -384,10 +385,23 @@ describe("Meta User-Agent fingerprint", () => {
 		expect(proxied).toEqual({});
 	});
 
-	test("registers a Meta-only before_provider_headers hook that fingerprints direct requests", async () => {
+	test("parses the META_MUSE_USER_AGENT opt-in strictly", () => {
+		for (const value of ["1", "true", "TRUE", " yes "]) {
+			expect(isMuseUserAgentEnabled({ [MUSE_USER_AGENT_ENV_VAR]: value })).toBe(
+				true,
+			);
+		}
+		for (const value of [undefined, "", "0", "false", "no", "on"]) {
+			expect(isMuseUserAgentEnabled({ [MUSE_USER_AGENT_ENV_VAR]: value })).toBe(
+				false,
+			);
+		}
+	});
+
+	test("headers hook fingerprints only opted-in, direct Contributor 1.3 requests", async () => {
 		type HeadersHandler = (
 			event: { headers: Record<string, string | null> },
-			ctx: { model?: { provider: string; baseUrl?: string } },
+			ctx: { model?: { provider: string; id?: string; baseUrl?: string } },
 		) => unknown;
 		let handler: HeadersHandler | undefined;
 		metaOAuthProvider({
@@ -400,38 +414,115 @@ describe("Meta User-Agent fingerprint", () => {
 		} as unknown as ExtensionAPI);
 		expect(handler).toBeDefined();
 
-		const otherHeaders: Record<string, string | null> = {};
-		await handler?.(
-			{ headers: otherHeaders },
-			{ model: { provider: "openai", baseUrl: META_API_BASE_URL } },
-		);
-		expect(otherHeaders).toEqual({});
+		const contributor = {
+			provider: META_PROVIDER_ID,
+			id: "muse-spark-1.3-contributor",
+			baseUrl: META_API_BASE_URL,
+		};
+		const headersFor = async (
+			optIn: string | undefined,
+			model: { provider: string; id?: string; baseUrl?: string },
+		) =>
+			withMuseUserAgent(optIn, async () => {
+				const headers: Record<string, string | null> = {};
+				await handler?.({ headers }, { model });
+				return headers;
+			});
 
-		const directHeaders: Record<string, string | null> = {};
-		await handler?.(
-			{ headers: directHeaders },
-			{ model: { provider: META_PROVIDER_ID, baseUrl: META_API_BASE_URL } },
+		// Opted in, direct endpoint, Contributor 1.3: fingerprinted.
+		expect((await headersFor("1", contributor))["User-Agent"]).toBe(
+			MUSE_USER_AGENT,
 		);
-		expect(directHeaders["User-Agent"]).toBe(MUSE_USER_AGENT);
+		// Default (not opted in): untouched, Pi's own User-Agent is kept.
+		expect(await headersFor(undefined, contributor)).toEqual({});
+		expect(await headersFor("0", contributor)).toEqual({});
+		// Opted in but any other Meta model, provider, or endpoint: untouched.
+		for (const model of [
+			{ ...contributor, id: "muse-spark-1.3" },
+			{ ...contributor, id: "muse-spark-1.2-contributor" },
+			{ ...contributor, provider: "openai" },
+			{ ...contributor, baseUrl: "https://proxy.example/v1" },
+			{ provider: META_PROVIDER_ID, id: contributor.id },
+		]) {
+			expect(await headersFor("1", model)).toEqual({});
+		}
+	});
 
-		const proxiedHeaders: Record<string, string | null> = {};
-		await handler?.(
-			{ headers: proxiedHeaders },
-			{
-				model: {
-					provider: META_PROVIDER_ID,
-					baseUrl: "https://proxy.example/v1",
-				},
-			},
-		);
-		expect(proxiedHeaders).toEqual({});
+	test("exposes Contributor 1.3 max only when the fingerprint is opted in", async () => {
+		const contributorMax = (models: { id: string; thinkingLevelMap?: { max?: string | null } }[]) =>
+			models.find((model) => model.id === "muse-spark-1.3-contributor")
+				?.thinkingLevelMap?.max;
+		const bareCatalog = { data: [{ id: "muse-spark-1.3-contributor" }] };
 
-		const unverifiedHeaders: Record<string, string | null> = {};
-		await handler?.(
-			{ headers: unverifiedHeaders },
-			{ model: { provider: META_PROVIDER_ID } },
+		await withMuseUserAgent(undefined, () => {
+			expect(contributorMax(fallbackModels())).toBeNull();
+			expect(contributorMax(toProviderModels(bareCatalog))).toBeNull();
+		});
+		await withMuseUserAgent("1", () => {
+			expect(contributorMax(fallbackModels())).toBe("max");
+			expect(contributorMax(toProviderModels(bareCatalog))).toBe("max");
+			// Opting in never adds max to models that reject it.
+			const other = fallbackModels().find(
+				(model) => model.id === "muse-spark-1.2-contributor",
+			);
+			expect(other?.thinkingLevelMap?.max).toBeNull();
+		});
+
+		// A server-advertised variant still wins over the opt-in gate.
+		await withMuseUserAgent(undefined, () => {
+			const advertised = toProviderModels({
+				data: [
+					{
+						id: "muse-spark-1.3-contributor",
+						metadata: {
+							"muse-code": { variants: { max: { reasoningEffort: "max" } } },
+						},
+					},
+				],
+			});
+			expect(contributorMax(advertised)).toBe("max");
+		});
+	});
+
+	test("re-gates Contributor max when restoring a cached catalog", async () => {
+		const cachedWhileOptedIn = await withMuseUserAgent("1", () =>
+			toProviderModels({ data: [{ id: "muse-spark-1.3-contributor" }] }),
 		);
-		expect(unverifiedHeaders).toEqual({});
+		const stored = {
+			models: cachedWhileOptedIn.map((model) => ({
+				...model,
+				api: "openai-responses",
+				provider: META_PROVIDER_ID,
+				baseUrl: META_API_BASE_URL,
+			})),
+			checkedAt: Date.now(),
+		};
+		const restore = (optIn: string | undefined) =>
+			withMuseUserAgent(optIn, () =>
+				refreshMetaModels({
+					allowNetwork: false,
+					stored,
+				} as unknown as Parameters<typeof refreshMetaModels>[0]),
+			);
+
+		expect((await restore(undefined))[0]?.thinkingLevelMap?.max).toBeNull();
+		expect((await restore("1"))[0]?.thinkingLevelMap?.max).toBe("max");
+
+		// A custom server-advertised effort name is not ours to gate.
+		const customStored = {
+			...stored,
+			models: stored.models.map((model) => ({
+				...model,
+				thinkingLevelMap: { ...model.thinkingLevelMap, max: "ultra" },
+			})),
+		};
+		const custom = await withMuseUserAgent(undefined, () =>
+			refreshMetaModels({
+				allowNetwork: false,
+				stored: customStored,
+			} as unknown as Parameters<typeof refreshMetaModels>[0]),
+		);
+		expect(custom[0]?.thinkingLevelMap?.max).toBe("ultra");
 	});
 });
 
@@ -570,12 +661,16 @@ async function callLiveContributorMax(
 
 describe("Meta live fingerprint probe", () => {
 	liveFingerprintTest(
-		"contributor max needs the Muse fingerprint and nothing else changes",
+		"contributor max is accepted with the Muse fingerprint",
 		async () => {
 			if (!liveApiKey) throw new Error("PI_META_LIVE_API_KEY is required");
-			// Without the fingerprint the identical payload is rejected.
+			// Informational only: observed 2026-09-25 as HTTP 400 without the
+			// fingerprint. Not asserted, so the suite keeps passing if Meta ever
+			// opens Contributor max to every client.
 			const bare = await callLiveContributorMax(liveApiKey, undefined);
-			expect(bare.status).toBe(400);
+			console.info(
+				`[live] contributor max without fingerprint: HTTP ${bare.status}`,
+			);
 
 			// With it, the same payload is accepted and echoes effort "max".
 			// The tiny output budget may truncate visible text; only the

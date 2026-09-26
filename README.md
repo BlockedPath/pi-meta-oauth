@@ -10,7 +10,7 @@ Meta Model API OAuth for [pi](https://pi.dev).
 
 - Use Muse Spark models through Pi's `openai-responses` provider (not `/chat/completions` — Muse prompt cache is ~0% there)
 - Send `prompt_cache_retention: "24h"` on Meta Responses requests unless the payload already set a retention
-- Send the Muse `User-Agent` fingerprint on direct Meta requests so `muse-spark-1.3-contributor` accepts reasoning effort `max` (explicit headers and other endpoints untouched)
+- Optional, off by default: send the Muse CLI `User-Agent` on direct `muse-spark-1.3-contributor` requests so it accepts reasoning effort `max` (see [Contributor `max`](#contributor-max-opt-in))
 - Device authorization against `https://auth.meta.com`
 - Model API-key minting through `POST https://api.meta.ai/muse-code/key`
 - Dynamic Muse model catalog from `GET https://api.meta.ai/v1/models`
@@ -42,12 +42,11 @@ Pi displays a device code, opens the Meta authorization flow, and mints a Model 
 The access key is re-minted daily.
 
 Prefer a static key instead? Set `META_API_KEY` (or `MODEL_API_KEY`) and skip
-`/login meta` entirely — requests use it directly, and the Contributor `max`
-tier below works the same on both credential types.
+`/login meta` entirely — requests use it directly.
 
 ## Models
 
-Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh` (`muse-spark-1.3` and `muse-spark-1.3-contributor` additionally support `max`). Contributor `max` rides the Muse `User-Agent` fingerprint the extension sends on direct `api.meta.ai` requests; Meta documents `max` for standard-tier 1.3 only, so treat Contributor `max` as observed behavior that Meta may gate differently later.
+Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh` (`muse-spark-1.3` additionally supports `max`; `muse-spark-1.3-contributor` does too when [opted in](#contributor-max-opt-in)).
 
 | id | pricing (input/output/cached) $/M |
 | --- | --- |
@@ -58,6 +57,18 @@ Fallback models use a 1,048,576-token context window, up to 256K output tokens, 
 | `muse-spark-1.1` | 1.25 / 4.25 / 0.15 |
 
 > **Contributor-model privacy:** discounted contributor models allow Meta to use prompts and completions for product improvement, including training future Meta models. Use a standard model such as `muse-spark-1.3` if you do not want the contributor terms. See [Meta's model documentation](https://dev.meta.ai/docs/models).
+
+### Contributor `max` (opt-in)
+
+Meta documents reasoning effort `max` for standard-tier `muse-spark-1.3` only. `muse-spark-1.3-contributor` rejects it (HTTP 400) unless the request carries the Muse CLI's `User-Agent` (observed 2026-09-25, same for API-key and `/login meta` credentials). To use it anyway:
+
+```bash
+export META_MUSE_USER_AGENT=1   # also accepts true / yes
+```
+
+With the flag set, the extension exposes `max` on `muse-spark-1.3-contributor` and sends the captured Muse `User-Agent` on that model's requests to `https://api.meta.ai/v1` only. Other models, proxies and custom `baseUrl`s, and any `User-Agent` you set yourself are left untouched. Without the flag, Contributor `max` is hidden and Pi's own `User-Agent` is sent.
+
+> **Warning:** this makes Pi identify as Meta's first-party Muse client. It relies on undocumented server behavior, is not supported by Meta, may stop working without notice, and may conflict with Meta's terms. Enable it only if you accept that risk for your account.
 
 To scope Pi's model picker to Meta models:
 
@@ -93,7 +104,7 @@ bun run typecheck
 bun test
 ```
 
-`bun test` is hermetic unless a Meta credential is already available. The live cache-hit probe makes real billable API calls when a credential resolves: two identical `/v1/responses` calls (asserting `cached_tokens` on the second), plus one 2s retry if that second call misses cache. The live fingerprint probe makes two tiny Contributor-`max` calls (one bare, expecting HTTP 400, one fingerprinted, expecting HTTP 200). The credential is resolved, in order, from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or the minted key from `~/.pi/agent/auth.json` after `/login meta` (skipped if expired). OAuth is enough — you do not need a separate key. Skipped when no valid credential exists (CI):
+`bun test` is hermetic unless a Meta credential is already available. The live cache-hit probe makes real billable API calls when a credential resolves: two identical `/v1/responses` calls (asserting `cached_tokens` on the second), plus one 2s retry if that second call misses cache. The live fingerprint probe makes two tiny Contributor-`max` calls: one without the fingerprint (status logged only) and one with it (asserting HTTP 200). It sends the header directly and does not depend on `META_MUSE_USER_AGENT`. The credential is resolved, in order, from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or the minted key from `~/.pi/agent/auth.json` after `/login meta` (skipped if expired). OAuth is enough — you do not need a separate key. Skipped when no valid credential exists (CI):
 
 ```bash
 bun test tests/meta-cache.test.ts
