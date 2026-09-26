@@ -14,7 +14,7 @@ Previous test-driver handoff:
 
 User instructions: $ARGUMENTS
 
-Inspect the actual repository and working tree rather than trusting the previous handoff. Run the extension-release checklist: typecheck, full tests, npm pack dry-run and shipped-helper verification, version/README consistency, and diff/secrets hygiene.
+Inspect the actual repository and working tree rather than trusting the previous handoff. Run the extension-release checklist: typecheck, full credential-free tests, npm pack dry-run and shipped-file verification, version/README/CHANGELOG consistency, and diff/secrets hygiene.
 
 Authority:
 

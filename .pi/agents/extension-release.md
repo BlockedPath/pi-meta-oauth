@@ -17,17 +17,9 @@ You verify the package is releasable and prepare the release: typecheck, run tes
 Verification checklist (in order):
 
 1. **Typecheck**: run `bun run typecheck` (tsc --noEmit). All errors must be resolved before release.
-2. **Tests**: run `bun test`. All green. The suite proves URL construction, the `OAuth` auth prefix, PCM→meter math, and—via `npm pack --dry-run --json`—that required helper assets ship in the tarball. It does not exercise the live Meta ASR endpoint, so a green run says nothing about that endpoint's availability or current contract.
-3. **Shipped files**: confirm `package.json` `files` (currently `LICENSE`, `README.md`, `extensions/`) covers every runtime asset. Run `npm pack --dry-run --json`, parse the manifest, and require these exact paths:
-   - `extensions/voice.ts`
-   - `extensions/voice/macos-audio.swift`
-   - `extensions/voice/Info.plist`
-   - `extensions/voice/Entitlements.plist`
-   - `extensions/voice/windows-audio.cs`
-   - `extensions/voice/windows-audio.ps1`
-   - Keep the Windows pair in sync with the Swift helper when the protocol changed; verify all three speak the same line-delimited JSON protocol (`ready`/`audio`/`stopped`/`error`) and 16 kHz mono s16le framing.
-   - The parsed pack manifest, not checkout existence alone, is the evidence that these assets ship.
-4. **Version/README consistency**: version in `package.json` matches the changelog/README claims; README documents the `PI_META_VOICE_ASR_ENDPOINT` / `PI_META_VOICE_ASR_MODEL` env overrides (the `MUSE_VOICE_*` aliases exist in code but are intentionally not documented — keep both working, don't document the aliases, and don't remove them).
+2. **Tests**: run `bun test` with Meta credentials cleared (unset `META_API_KEY`, `MODEL_API_KEY`, `PI_META_LIVE_API_KEY`, and `META_MUSE_USER_AGENT`, and point `HOME`/`USERPROFILE` at an empty directory) so the live probes skip and no billable requests are made. All green. The suite covers OAuth device login and key minting, catalog mapping and caching, the Responses cache hints, reasoning-effort maps, the opt-in Muse `User-Agent` gating, and (in `tests/package.test.ts`) that only `extensions/meta.ts` is registered and shipped. It does not exercise live Meta endpoints, so a green run says nothing about their current behavior.
+3. **Shipped files**: confirm `package.json` `files` (currently `LICENSE`, `README.md`, `extensions/`) covers every runtime asset. Run `npm pack --dry-run --json`, parse the manifest, and require exactly `LICENSE`, `README.md`, `extensions/meta.ts`, and `package.json`. Anything else in the tarball (tests, `.pi/`, lockfiles, stray scripts) is a failure. The parsed pack manifest, not checkout existence alone, is the evidence of what ships.
+4. **Version/README/CHANGELOG consistency**: the `package.json` version has a matching dated `## [x.y.z]` section in `CHANGELOG.md` with compare links updated, and every PR merged since the previous tag is listed. `README.md` documents the `META_MUSE_USER_AGENT` opt-in (with its warning) and the supported Pi range matches the `peerDependencies` in `package.json`.
 5. **Diff hygiene**: confirm there are no uncommitted secrets, stray debug files, or generated artifacts that would leak into the tarball.
 
 Permissions:
