@@ -7,13 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-26
+
 ### Added
 
+- Reasoning effort `max` on `muse-spark-1.3` (live-verified 2026-09-06). Catalog entries without `variants.max` inherit it from the bundled fallback, while server-advertised values still win ([#13](https://github.com/BlockedPath/pi-meta-oauth/pull/13) by [@KSonny4](https://github.com/KSonny4)).
 - Opt-in `META_MUSE_USER_AGENT=1` exposes reasoning effort `max` on `muse-spark-1.3-contributor` and sends the captured Muse CLI `User-Agent` on that model's direct `https://api.meta.ai/v1` requests, which Meta requires for Contributor `max`. Off by default. Other models, proxies, and explicit `User-Agent` headers are untouched. This identifies Pi as Meta's first-party client and is unsupported by Meta; see the README warning ([#20](https://github.com/BlockedPath/pi-meta-oauth/pull/20) by [@AdityaVG13](https://github.com/AdityaVG13)).
 
 ### Changed
 
-- Support Pi 0.86 and 0.87: widen the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` peer ranges to `>=0.83.0 <0.88.0` and typecheck/test against 0.87.1. The extension still overrides Pi's built-in `meta` provider on 0.87.1.
+- Support Pi 0.85: widen the peer ranges and typecheck/test against 0.85.1 ([#18](https://github.com/BlockedPath/pi-meta-oauth/pull/18) by [@antonioc-cl](https://github.com/antonioc-cl)).
+- Support Pi 0.86 and 0.87: widen the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` peer ranges to `>=0.83.0 <0.88.0` and typecheck/test against 0.87.1. The extension still overrides Pi's built-in `meta` provider on 0.87.1 ([#21](https://github.com/BlockedPath/pi-meta-oauth/pull/21)).
 
 ## [0.6.1] - 2026-09-04
 
@@ -72,7 +76,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.4.4...v0.5.0
