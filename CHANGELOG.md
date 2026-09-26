@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Support Pi 0.86 and 0.87: widen the `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` peer ranges to `>=0.83.0 <0.88.0` and typecheck/test against 0.87.1. The extension still overrides Pi's built-in `meta` provider on 0.87.1.
+
 ## [0.6.1] - 2026-09-04
 
 ### Fixed

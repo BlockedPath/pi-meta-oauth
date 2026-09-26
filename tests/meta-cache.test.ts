@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
-import type { Model } from "@earendil-works/pi-ai";
+import * as piAi from "@earendil-works/pi-ai";
+import type { Context, Model } from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -18,6 +19,17 @@ import { join } from "node:path";
 
 const LIVE_CACHE_MODEL = "muse-spark-1.2-contributor";
 const LIVE_CACHE_KEY = "pi-meta-oauth-live-cache-probe-v1";
+
+// Pi 0.86+ stream functions take a branded TranscriptContext built by
+// normalizeContext(); Pi 0.83–0.85 take a plain Context and do not export
+// normalizeContext. A namespace import keeps the file loadable on both.
+function toStreamContext(context: Context): Parameters<typeof streamSimple>[1] {
+	const normalize = (piAi as { normalizeContext?: (c: Context) => unknown })
+		.normalizeContext;
+	return (
+		typeof normalize === "function" ? normalize(context) : context
+	) as Parameters<typeof streamSimple>[1];
+}
 
 function resolveLiveMetaApiKey(): string | undefined {
 	for (const value of [
@@ -82,9 +94,9 @@ async function captureResponsesRequest(options?: {
 	let payload: Record<string, unknown> | undefined;
 	const events = streamSimple(
 		museModel(),
-		{
+		toStreamContext({
 			messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
-		},
+		}),
 		{
 			apiKey: "test-key",
 			sessionId: options?.sessionId ?? "sid",
