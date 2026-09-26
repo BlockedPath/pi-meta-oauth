@@ -19,11 +19,11 @@ export const META_CLIENT_ID = "1031625952748946";
 /**
  * User-Agent captured from the Muse CLI inference entrypoint.
  * Sending it on direct Meta Model API requests enables `reasoning.effort:
- * "max"` on muse-spark-1.3-contributor (live-verified 2026-09-25: identical
- * payloads 400 without it and 200 with it, on both API-key and
- * login-minted credentials). Observed wire behavior, not a permission
- * claim: Meta documents `max` for standard-tier 1.3 only, and the gate
- * may change server-side without notice.
+ * "max"` on muse-spark-1.3-contributor (live-verified 2026-09-25 on
+ * login-minted credentials: identical payloads 400 without it and 200
+ * with it; API-key parity reported in oh-my-pi#12199). Observed wire
+ * behavior, not a permission claim: Meta documents `max` for standard-tier
+ * 1.3 only, and the gate may change server-side without notice.
  */
 export const MUSE_USER_AGENT =
 	"muse-build/1.3.0 (non-interactive; linux-x86_64; build ac7280f2aca67769d1455a8847bb502b617d50f6)";
