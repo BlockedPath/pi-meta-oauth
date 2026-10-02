@@ -1,28 +1,27 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
-import * as piAi from "@earendil-works/pi-ai";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Context, Model } from "@earendil-works/pi-ai";
+import * as piAi from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import {
+import metaOAuthProvider, {
 	applyMetaResponsesCacheHints,
 	applyMetaUserAgentFingerprint,
 	createMetaProviderConfig,
 	isDirectMetaModelApiUrl,
+	isMuseUserAgentEnabled,
 	META_API_BASE_URL,
 	META_PROMPT_CACHE_RETENTION,
 	META_PROVIDER_ID,
 	MUSE_USER_AGENT,
 	MUSE_USER_AGENT_ENV_VAR,
-	isMuseUserAgentEnabled,
 	refreshMetaModels,
 	toProviderModels,
 } from "../extensions/meta.ts";
 import { withMuseUserAgent } from "./muse-env.ts";
-import metaOAuthProvider from "../extensions/meta.ts";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
 const LIVE_CACHE_MODEL = "muse-spark-1.2-contributor";
 const LIVE_CACHE_KEY = "pi-meta-oauth-live-cache-probe-v1";
@@ -329,7 +328,6 @@ describe("Meta Responses cache and reasoning contracts", () => {
 			prompt_cache_retention: "24h",
 		});
 	});
-
 });
 
 describe("Meta User-Agent fingerprint", () => {
@@ -361,9 +359,7 @@ describe("Meta User-Agent fingerprint", () => {
 
 	test("setdefaults the fingerprint and preserves explicit headers", () => {
 		const fresh: Record<string, string | null> = {};
-		expect(applyMetaUserAgentFingerprint(fresh, META_API_BASE_URL)).toBe(
-			true,
-		);
+		expect(applyMetaUserAgentFingerprint(fresh, META_API_BASE_URL)).toBe(true);
 		expect(fresh["User-Agent"]).toBe(MUSE_USER_AGENT);
 
 		for (const headers of [
@@ -449,7 +445,9 @@ describe("Meta User-Agent fingerprint", () => {
 	});
 
 	test("exposes Contributor 1.3 max only when the fingerprint is opted in", async () => {
-		const contributorMax = (models: { id: string; thinkingLevelMap?: { max?: string | null } }[]) =>
+		const contributorMax = (
+			models: { id: string; thinkingLevelMap?: { max?: string | null } }[],
+		) =>
 			models.find((model) => model.id === "muse-spark-1.3-contributor")
 				?.thinkingLevelMap?.max;
 		const bareCatalog = { data: [{ id: "muse-spark-1.3-contributor" }] };
@@ -468,7 +466,7 @@ describe("Meta User-Agent fingerprint", () => {
 			expect(other?.thinkingLevelMap?.max).toBeNull();
 		});
 
-		// A server-advertised variant still wins over the opt-in gate.
+		// A server-advertised literal max still requires the fingerprint opt-in.
 		await withMuseUserAgent(undefined, () => {
 			const advertised = toProviderModels({
 				data: [
@@ -480,7 +478,7 @@ describe("Meta User-Agent fingerprint", () => {
 					},
 				],
 			});
-			expect(contributorMax(advertised)).toBe("max");
+			expect(contributorMax(advertised)).toBeNull();
 		});
 	});
 

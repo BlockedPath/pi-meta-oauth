@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Split the extension into focused OAuth, model validation, persistence, provider, and request-policy modules while preserving the registered entrypoint and named exports.
+- Add strict indexed-access checks, Biome lint/format checks, a committed Bun lockfile, and shared local/CI verification through `bun run check`.
+- Make `bun run test` credential-free with an isolated child environment and home; retain optional billable probes through `bun run test:live`.
+
+### Fixed
+
+- Honor login cancellation throughout device authorization, polling, and key minting, and stop polling when the device code expires.
+- Validate malformed catalog and credential responses and return independent fallback/cache model metadata.
+- Require Contributor literal `max` opt-in even when the catalog advertises it, and limit the Muse fingerprint to the bare direct endpoint.
+
 ## [0.7.0] - 2026-09-26
 
 ### Added
