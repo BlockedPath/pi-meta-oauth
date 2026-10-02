@@ -79,7 +79,7 @@ jobs:
             --ci-status=started \
             --ci-text="Typecheck and test"
 
-  typecheck-and-test:
+  pi-compatibility:
     name: Verify Pi ${{ matrix.pi-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -113,6 +113,25 @@ jobs:
 
       - name: Lint, typecheck, and test
         run: bun run check
+
+  typecheck-and-test:
+    name: Typecheck and test
+    needs:
+      - pi-compatibility
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+
+    steps:
+      - name: Require every Pi compatibility check to pass
+        if: always()
+        env:
+          MATRIX_RESULT: ${{ needs.pi-compatibility.result }}
+        run: |
+          if [[ "${MATRIX_RESULT}" != "success" ]]; then
+            echo "Pi compatibility checks did not all pass: ${MATRIX_RESULT}"
+            exit 1
+          fi
 
   badgetizr-result:
     name: Update final PR badges
