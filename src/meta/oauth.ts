@@ -8,6 +8,7 @@ import {
 	DEVICE_AUTHORIZATION_URL,
 	DEVICE_CODE_GRANT,
 	DEVICE_TOKEN_URL,
+	META_API_VERSION,
 	META_CLIENT_ID,
 } from "./constants.ts";
 import { delay, errorDetail, postForm, responseBody } from "./http.ts";
@@ -201,7 +202,7 @@ export async function mintMetaApiKey(
 			Accept: "application/json",
 			Authorization: `Bearer ${identityToken}`,
 			"Content-Type": "application/json",
-			"x-api-version": "1.0.0",
+			"x-api-version": META_API_VERSION,
 		},
 		body: "{}",
 		signal,

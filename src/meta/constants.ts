@@ -3,6 +3,7 @@ export const META_API_BASE_URL = "https://api.meta.ai/v1";
 export const META_MODEL_CATALOG_URL = `${META_API_BASE_URL}/models`;
 export const META_AUTH_BASE_URL = "https://auth.meta.com";
 export const META_CLIENT_ID = "1031625952748946";
+export const META_API_VERSION = "1.0.0";
 export const META_ENV_VAR = "META_API_KEY";
 export const MODEL_API_ENV_VAR = "MODEL_API_KEY";
 

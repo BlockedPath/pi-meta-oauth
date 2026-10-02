@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import {
 	META_API_BASE_URL,
+	META_API_VERSION,
 	META_MODEL_CATALOG_URL,
 	META_PROVIDER_ID,
 } from "./constants.ts";
@@ -100,7 +101,7 @@ export async function refreshMetaModels(
 			headers: {
 				Accept: "application/json",
 				Authorization: `Bearer ${apiKey}`,
-				"x-api-version": "1.0.0",
+				"x-api-version": META_API_VERSION,
 			},
 			signal: context.signal,
 		});

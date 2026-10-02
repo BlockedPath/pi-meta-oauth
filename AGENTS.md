@@ -32,7 +32,7 @@ Keep both Pi refresh-context shapes working:
 - Pi 0.83: mutable `store` read/write API
 - Pi 0.84: immutable `stored` snapshot plus generation-checked `publish`
 
-Hermetic OAuth and catalog tests live in `tests/meta.test.ts`.
+Hermetic OAuth and catalog tests live in `tests/meta.test.ts`. Failure-path and wire-shape tests (exact error messages, polling back-off, request shapes, catalog fallbacks, bundled model table) live in `tests/meta-failures.test.ts`.
 
 ## Prompt caching
 
