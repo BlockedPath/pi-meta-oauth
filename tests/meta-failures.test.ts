@@ -31,7 +31,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function scriptedFetch(...responses: Array<Response | Error>) {
 	const requests: Array<{ url: string; init?: RequestInit }> = [];
-	const fetchMock = (async (input: string | URL | Request, init?: RequestInit) => {
+	const fetchMock = (async (
+		input: string | URL | Request,
+		init?: RequestInit,
+	) => {
 		requests.push({ url: String(input), init });
 		const next = responses.shift();
 		if (!next) throw new Error("Unexpected request");
@@ -135,7 +138,10 @@ describe("Meta device login failures", () => {
 	];
 	for (const [label, grant, message] of terminalGrants) {
 		test(`stops polling on ${label}`, async () => {
-			const { fetchMock, requests } = scriptedFetch(deviceAuthorization(), grant);
+			const { fetchMock, requests } = scriptedFetch(
+				deviceAuthorization(),
+				grant,
+			);
 			expect(
 				await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
 			).toBe(message);
@@ -149,7 +155,9 @@ describe("Meta device login failures", () => {
 		);
 		expect(
 			await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
-		).toBe("Meta login could not be started (HTTP 503): temporarily_unavailable");
+		).toBe(
+			"Meta login could not be started (HTTP 503): temporarily_unavailable",
+		);
 		expect(requests).toHaveLength(1);
 	});
 
@@ -252,8 +260,12 @@ describe("Meta device login failures", () => {
 				"application/json",
 			);
 		}
-		expect(String(authorization?.init?.body)).toBe("client_id=1031625952748946");
-		expect(Object.fromEntries(new URLSearchParams(String(token?.init?.body)))).toEqual({
+		expect(String(authorization?.init?.body)).toBe(
+			"client_id=1031625952748946",
+		);
+		expect(
+			Object.fromEntries(new URLSearchParams(String(token?.init?.body))),
+		).toEqual({
 			grant_type: "urn:ietf:params:oauth:grant-type:device_code",
 			device_code: "device-token",
 			client_id: "1031625952748946",
@@ -279,7 +291,11 @@ describe("Meta API-key minting failures", () => {
 			jsonResponse({ message: "upstream down" }, 500),
 			"Meta API-key mint failed (HTTP 500): upstream down",
 		],
-		["an empty body", jsonResponse({}, 500), "Meta API-key mint failed (HTTP 500)"],
+		[
+			"an empty body",
+			jsonResponse({}, 500),
+			"Meta API-key mint failed (HTTP 500)",
+		],
 		[
 			"a non-JSON body",
 			new Response("<html>bad gateway</html>", { status: 502 }),
@@ -305,7 +321,10 @@ describe("Meta API-key minting failures", () => {
 		],
 		[
 			"a blank error_description, falling through to detail",
-			jsonResponse({ error_description: "   ", detail: "d", message: "m" }, 500),
+			jsonResponse(
+				{ error_description: "   ", detail: "d", message: "m" },
+				500,
+			),
 			"Meta API-key mint failed (HTTP 500): d",
 		],
 		[
@@ -322,9 +341,9 @@ describe("Meta API-key minting failures", () => {
 	for (const [label, response, message] of failures) {
 		test(`reports ${label}`, async () => {
 			const { fetchMock } = scriptedFetch(response);
-			expect(await rejectionMessage(mintMetaApiKey("identity-token", fetchMock))).toBe(
-				message,
-			);
+			expect(
+				await rejectionMessage(mintMetaApiKey("identity-token", fetchMock)),
+			).toBe(message);
 		});
 	}
 
@@ -335,17 +354,22 @@ describe("Meta API-key minting failures", () => {
 	] as const) {
 		test(`reports a bare no-key error for ${label}`, async () => {
 			const { fetchMock } = scriptedFetch(jsonResponse(body));
-			expect(await rejectionMessage(mintMetaApiKey("identity-token", fetchMock))).toBe(
-				"Meta did not issue an API key.",
-			);
+			expect(
+				await rejectionMessage(mintMetaApiKey("identity-token", fetchMock)),
+			).toBe("Meta did not issue an API key.");
 		});
 	}
 
 	test("appends the setup link when Meta supplies one", async () => {
 		const { fetchMock } = scriptedFetch(
-			jsonResponse({ require_payment: true, action_url: "https://dev.meta.ai/billing" }),
+			jsonResponse({
+				require_payment: true,
+				action_url: "https://dev.meta.ai/billing",
+			}),
 		);
-		expect(await rejectionMessage(mintMetaApiKey("identity-token", fetchMock))).toBe(
+		expect(
+			await rejectionMessage(mintMetaApiKey("identity-token", fetchMock)),
+		).toBe(
 			"Meta did not issue an API key. Complete setup at https://dev.meta.ai/billing.",
 		);
 	});
@@ -360,14 +384,18 @@ describe("Meta API-key minting failures", () => {
 
 	test("forwards the AbortSignal to the mint request", async () => {
 		const signal = new AbortController().signal;
-		const { fetchMock, requests } = scriptedFetch(jsonResponse({ api_key: "key" }));
+		const { fetchMock, requests } = scriptedFetch(
+			jsonResponse({ api_key: "key" }),
+		);
 		await mintMetaApiKey("identity-token", fetchMock, signal);
 		expect(requests[0]?.init?.signal).toBe(signal);
 	});
 
 	test("keeps other credential fields and extends expiry on refresh", async () => {
 		const before = Date.now();
-		const { fetchMock } = scriptedFetch(jsonResponse({ api_key: "rotated-key" }));
+		const { fetchMock } = scriptedFetch(
+			jsonResponse({ api_key: "rotated-key" }),
+		);
 		const refreshed = await refreshMetaToken(
 			{
 				refresh: "identity-token",
@@ -420,7 +448,11 @@ describe("Meta catalog refresh fallbacks", () => {
 		expect(models).toEqual(fallbackModels());
 	});
 
-	for (const credential of [undefined, { type: "oauth" }, { type: "api_key" }]) {
+	for (const credential of [
+		undefined,
+		{ type: "oauth" },
+		{ type: "api_key" },
+	]) {
 		test(`skips the network without a usable key (${JSON.stringify(credential) ?? "no credential"})`, async () => {
 			const models = await refreshMetaModels(
 				context({ credential }),
@@ -432,7 +464,10 @@ describe("Meta catalog refresh fallbacks", () => {
 
 	test("authenticates with the OAuth access key or the API key", async () => {
 		for (const [credential, key] of [
-			[{ type: "oauth", access: "minted-key", refresh: "r", expires: 0 }, "minted-key"],
+			[
+				{ type: "oauth", access: "minted-key", refresh: "r", expires: 0 },
+				"minted-key",
+			],
 			[{ type: "api_key", key: "plain-key" }, "plain-key"],
 		] as const) {
 			const signal = new AbortController().signal;
@@ -454,9 +489,12 @@ describe("Meta catalog refresh fallbacks", () => {
 		["an HTTP error", jsonResponse({ message: "down" }, 500)],
 		["a non-JSON error", new Response("<html>oops</html>", { status: 502 })],
 		["an OK response with no data", jsonResponse({})],
-		["only hidden models", jsonResponse({
-			data: [{ id: "x", metadata: { "muse-code": { is_hidden: true } } }],
-		})],
+		[
+			"only hidden models",
+			jsonResponse({
+				data: [{ id: "x", metadata: { "muse-code": { is_hidden: true } } }],
+			}),
+		],
 	];
 	for (const [label, response] of unusableCatalogs) {
 		test(`falls back and does not persist after ${label}`, async () => {
@@ -576,13 +614,33 @@ describe("Meta catalog refresh fallbacks", () => {
 });
 
 describe("Meta bundled models", () => {
-	const standardCost = { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 };
-	const contributorCost = { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 };
+	const standardCost = {
+		input: 1.25,
+		output: 4.25,
+		cacheRead: 0.15,
+		cacheWrite: 0,
+	};
+	const contributorCost = {
+		input: 0.1,
+		output: 0.2,
+		cacheRead: 0.002,
+		cacheWrite: 0,
+	};
 	const expected = [
 		["muse-spark-1.3", "Muse Spark 1.3", standardCost, "max"],
-		["muse-spark-1.3-contributor", "Muse Spark 1.3 Contributor", contributorCost, null],
+		[
+			"muse-spark-1.3-contributor",
+			"Muse Spark 1.3 Contributor",
+			contributorCost,
+			null,
+		],
 		["muse-spark-1.2", "Muse Spark 1.2", standardCost, null],
-		["muse-spark-1.2-contributor", "Muse Spark 1.2 Contributor", contributorCost, null],
+		[
+			"muse-spark-1.2-contributor",
+			"Muse Spark 1.2 Contributor",
+			contributorCost,
+			null,
+		],
 		["muse-spark-1.1", "Muse Spark 1.1", standardCost, null],
 	] as const;
 
@@ -666,9 +724,14 @@ describe("Meta extension entry point", () => {
 
 	test("never overwrites a key that is already set", async () => {
 		expect(
-			await withKeys({ META_API_KEY: "meta", MODEL_API_KEY: "model" }, register),
+			await withKeys(
+				{ META_API_KEY: "meta", MODEL_API_KEY: "model" },
+				register,
+			),
 		).toEqual({ META_API_KEY: "meta", MODEL_API_KEY: "model" });
-		expect(await withKeys({ META_API_KEY: "", MODEL_API_KEY: "model" }, register)).toEqual({
+		expect(
+			await withKeys({ META_API_KEY: "", MODEL_API_KEY: "model" }, register),
+		).toEqual({
 			META_API_KEY: "",
 			MODEL_API_KEY: "model",
 		});

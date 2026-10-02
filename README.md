@@ -107,14 +107,51 @@ catalog.
 ```bash
 pi --list-models meta
 pi -p --provider meta --model muse-spark-1.3 "Reply exactly: META_OK"
-bun run typecheck
-bun test
+bun install --frozen-lockfile
+bun run check
 ```
 
-`bun test` is hermetic unless a Meta credential is already available. The live cache-hit probe makes real billable API calls when a credential resolves: two identical `/v1/responses` calls (asserting `cached_tokens` on the second), plus one 2s retry if that second call misses cache. The live fingerprint probe makes two tiny Contributor-`max` calls: one without the fingerprint (status logged only) and one with it (asserting HTTP 200). It sends the header directly and does not depend on `META_MUSE_USER_AGENT`. The credential is resolved, in order, from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or the minted key from `~/.pi/agent/auth.json` after `/login meta` (skipped if expired). OAuth is enough — you do not need a separate key. Skipped when no valid credential exists (CI):
+`bun run check` runs Biome, TypeScript, and the hermetic test suite. Use
+`bun run test` for tests alone, or pass a file or test filter after the command.
+The launcher clears Meta credentials in the child process, disables dotenv
+loading, and gives it an empty temporary home. Your environment and stored
+credentials are preserved. CI uses the same command and committed lockfile.
+
+Live probes require the explicit `bun run test:live` command. Direct `bun test`
+also bypasses isolation and can run these probes when credentials are available.
+The cache probe makes two billable Responses requests plus one retry on a cache
+miss. The fingerprint probe makes two tiny Contributor-`max` requests; it sends
+the header directly, independently of `META_MUSE_USER_AGENT`. The catalog probe
+runs when `PI_META_LIVE_API_KEY` is set. Cache and fingerprint probes resolve
+credentials from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an
+unexpired minted key in `~/.pi/agent/auth.json`, in that order. Probes skip when
+no usable credential exists.
 
 ```bash
-bun test tests/meta-cache.test.ts
+bun run test:live tests/meta-cache.test.ts
 # or, if you are not logged in:
-PI_META_LIVE_API_KEY='LLM|...' bun test tests/meta-cache.test.ts
+PI_META_LIVE_API_KEY='LLM|...' bun run test:live tests/meta-cache.test.ts
 ```
+
+## Development
+
+`extensions/meta.ts` is the only registered Pi extension. It connects the
+provider and hooks; implementation modules live in `src/meta/` and ship with
+the package:
+
+- `oauth.ts`: device authorization, cancellable polling, key minting, and refresh.
+- `models.ts`: fresh fallback definitions and validation of remote/cached models.
+- `model-store.ts`: catalog refresh and Pi 0.83/0.84+ persistence compatibility.
+- `muse-policy.ts` and `request-policy.ts`: opt-in effort gating and request hints.
+- `provider.ts`, `environment.ts`, `http.ts`, `constants.ts`, and `types.ts`:
+  provider assembly, key aliases, shared transport, and common definitions.
+
+Network JSON and persisted catalogs are validated before becoming Pi model
+definitions. Each provider configuration owns its model metadata; mutations
+cannot alter later configurations or cached entries. Login honors Pi's abort
+signal across authorization, polling, and minting. Catalog persistence remains
+best-effort and uses the host's generation check when available.
+
+Use `bun run format` to apply formatting and safe lint fixes, and
+`bun run lint` or `bun run typecheck` for individual checks. The extension's
+existing named exports remain available from `extensions/meta.ts`.

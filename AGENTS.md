@@ -10,6 +10,19 @@ This branch intentionally ships only the Meta OAuth/provider extension:
 
 The extension owns the complete login/provider flow: Meta device authorization, identity-token polling, Model API-key minting and refresh, Muse model discovery, and provider request compatibility hints.
 
+## Module boundaries and verification
+
+Keep `extensions/meta.ts` as the only extension entrypoint. Supporting runtime
+modules live under `src/meta/`, which must remain included in the package's
+`files` list. Keep provider wiring, OAuth, model decoding, persistence, and
+request policy separate; preserve the entrypoint's existing named exports.
+
+Use `bun run check` for lint, strict typecheck, and hermetic tests. `bun run test`
+runs through `scripts/test.ts`, which strips credentials and isolates the child
+home without changing the caller. Direct `bun test` bypasses that protection.
+Run `bun run test:live` only when live billable probes are explicitly requested.
+Install dependencies with `bun install --frozen-lockfile`.
+
 ## OAuth flow
 
 `/login meta` uses the device flow at `https://auth.meta.com`, then exchanges the identity token through `POST https://api.meta.ai/muse-code/key`. Pi stores the identity token as `refresh`, the minted Model API key as `access`, and refreshes that key daily.

@@ -75,23 +75,25 @@ describe("Meta OAuth provider", () => {
 	// META_MUSE_USER_AGENT opts in (covered in meta-cache.test.ts). Every
 	// other Muse model 400s with "Supported values: [minimal, low, medium,
 	// high, xhigh]". The bare catalog carries no variants block, so known
-	// IDs inherit max support from FALLBACK_MODELS while server-advertised
-	// variants still win.
+	// IDs inherit max support from fallbacks while custom server-advertised
+	// effort names still win. Literal Contributor max always requires opt-in.
 	test("exposes max effort only where the model supports it", async () => {
-		const models = await withMuseUserAgent(undefined, () => toProviderModels({
-			data: [
-				{ id: "muse-spark-1.3" },
-				{ id: "muse-spark-1.3-contributor" },
-				{ id: "muse-spark-1.2" },
-				{ id: "muse-spark-1.2-contributor" },
-				{
-					id: "muse-spark-future",
-					metadata: {
-						"muse-code": { variants: { max: { reasoningEffort: "ultra" } } },
+		const models = await withMuseUserAgent(undefined, () =>
+			toProviderModels({
+				data: [
+					{ id: "muse-spark-1.3" },
+					{ id: "muse-spark-1.3-contributor" },
+					{ id: "muse-spark-1.2" },
+					{ id: "muse-spark-1.2-contributor" },
+					{
+						id: "muse-spark-future",
+						metadata: {
+							"muse-code": { variants: { max: { reasoningEffort: "ultra" } } },
+						},
 					},
-				},
-			],
-		}));
+				],
+			}),
+		);
 
 		expect(models).toHaveLength(5);
 		const byId = Object.fromEntries(models.map((m) => [m.id, m]));
@@ -99,22 +101,18 @@ describe("Meta OAuth provider", () => {
 			xhigh: "xhigh",
 			max: "max",
 		});
-		expect(byId["muse-spark-1.3-contributor"]?.thinkingLevelMap).toMatchObject(
-			{
-				xhigh: "xhigh",
-				max: null,
-			},
-		);
+		expect(byId["muse-spark-1.3-contributor"]?.thinkingLevelMap).toMatchObject({
+			xhigh: "xhigh",
+			max: null,
+		});
 		expect(byId["muse-spark-1.2"]?.thinkingLevelMap).toMatchObject({
 			xhigh: "xhigh",
 			max: null,
 		});
-		expect(byId["muse-spark-1.2-contributor"]?.thinkingLevelMap).toMatchObject(
-			{
-				xhigh: "xhigh",
-				max: null,
-			},
-		);
+		expect(byId["muse-spark-1.2-contributor"]?.thinkingLevelMap).toMatchObject({
+			xhigh: "xhigh",
+			max: null,
+		});
 		expect(byId["muse-spark-future"]?.thinkingLevelMap).toMatchObject({
 			max: "ultra",
 		});
@@ -296,7 +294,7 @@ describe("Meta OAuth provider", () => {
 			baseUrl: META_API_BASE_URL,
 			contextWindow: fallback.contextWindow,
 		});
-		expect("provider" in models[0]).toBe(false);
+		expect(models[0]).not.toHaveProperty("provider");
 	});
 
 	// Pi 0.84 replaced the 0.83 `store` read/write pair with an immutable
@@ -373,7 +371,7 @@ describe("Meta OAuth provider", () => {
 			baseUrl: META_API_BASE_URL,
 			contextWindow: fallback.contextWindow,
 		});
-		expect("provider" in models[0]).toBe(false);
+		expect(models[0]).not.toHaveProperty("provider");
 	});
 
 	test("does not persist an empty catalog and restores the previous cache", async () => {
@@ -522,7 +520,8 @@ describe("Meta OAuth provider", () => {
 				device_code: "device-token",
 				user_code: "ABCD-1234",
 				verification_uri: "https://auth.meta.com/device",
-				verification_uri_complete: "https://auth.meta.com/device?code=ABCD-1234",
+				verification_uri_complete:
+					"https://auth.meta.com/device?code=ABCD-1234",
 				expires_in: 900,
 				interval: 1,
 			}),
