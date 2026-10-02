@@ -40,6 +40,10 @@ const MUSE_USER_AGENT_MODEL_IDS: ReadonlySet<string> = new Set([
 	"muse-spark-1.3-contributor",
 ]);
 const META_ENV_VAR = "META_API_KEY";
+const MODEL_API_KEY_ENV_VAR = "MODEL_API_KEY";
+const META_API_VERSION = "1.0.0";
+const DEFAULT_CONTEXT_WINDOW = 1_048_576;
+const DEFAULT_MAX_TOKENS = 256_000;
 
 const DEVICE_AUTHORIZATION_URL = `${META_AUTH_BASE_URL}/oidc/device/authorization/`;
 const DEVICE_TOKEN_URL = `${META_AUTH_BASE_URL}/oidc/device/token/`;
@@ -60,11 +64,8 @@ interface DeviceAuthorization {
 	interval?: number;
 }
 
-interface DeviceTokenGrant {
-	access_token: string;
-}
-
-interface OAuthError {
+interface DeviceTokenResponse {
+	access_token?: string;
 	error?: string;
 	error_description?: string;
 }
@@ -99,105 +100,71 @@ interface MetaCatalogModel {
 	};
 }
 
+type ThinkingLevelMap = NonNullable<MetaProviderModel["thinkingLevelMap"]>;
+
+const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const;
+const STANDARD_COST = {
+	input: 1.25,
+	output: 4.25,
+	cacheRead: 0.15,
+	cacheWrite: 0,
+};
+const CONTRIBUTOR_COST = {
+	input: 0.1,
+	output: 0.2,
+	cacheRead: 0.002,
+	cacheWrite: 0,
+};
+
+function buildThinkingLevelMap(
+	effortFor: (level: (typeof EFFORT_LEVELS)[number]) => string,
+	max: string | null,
+): ThinkingLevelMap {
+	const map: ThinkingLevelMap = { off: null, max };
+	for (const level of EFFORT_LEVELS) map[level] = effortFor(level);
+	return map;
+}
+
+function museCompat(): MetaProviderModel["compat"] {
+	return { supportsReasoningEffort: true, supportsToolSearch: true };
+}
+
+function museFallbackModel(
+	id: string,
+	name: string,
+	cost: MetaProviderModel["cost"],
+	max: string | null = null,
+): MetaProviderModel {
+	return {
+		id,
+		name,
+		reasoning: true,
+		thinkingLevelMap: buildThinkingLevelMap((level) => level, max),
+		input: ["text", "image"],
+		cost: { ...cost },
+		contextWindow: DEFAULT_CONTEXT_WINDOW,
+		maxTokens: DEFAULT_MAX_TOKENS,
+		compat: museCompat(),
+	};
+}
+
 const FALLBACK_MODELS: MetaProviderModel[] = [
-	{
-		id: "muse-spark-1.3",
-		name: "Muse Spark 1.3",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: "max",
-		},
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.3-contributor",
-		name: "Muse Spark 1.3 Contributor",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			// Accepted only with the Muse User-Agent fingerprint (live-verified
-			// 2026-09-25). gateMuseMaxEffort() maps this to "max" when
-			// META_MUSE_USER_AGENT opts in; otherwise it stays unexposed.
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.2",
-		name: "Muse Spark 1.2",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.2-contributor",
-		name: "Muse Spark 1.2 Contributor",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
-	{
-		id: "muse-spark-1.1",
-		name: "Muse Spark 1.1",
-		reasoning: true,
-		thinkingLevelMap: {
-			off: null,
-			minimal: "minimal",
-			low: "low",
-			medium: "medium",
-			high: "high",
-			xhigh: "xhigh",
-			max: null,
-		},
-		input: ["text", "image"],
-		cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
-		contextWindow: 1_048_576,
-		maxTokens: 256_000,
-		compat: { supportsReasoningEffort: true, supportsToolSearch: true },
-	},
+	museFallbackModel("muse-spark-1.3", "Muse Spark 1.3", STANDARD_COST, "max"),
+	// `max` is accepted only with the Muse User-Agent fingerprint (live-verified
+	// 2026-09-25). gateMuseMaxEffort() maps it to "max" when META_MUSE_USER_AGENT
+	// opts in; otherwise it stays unexposed.
+	museFallbackModel(
+		"muse-spark-1.3-contributor",
+		"Muse Spark 1.3 Contributor",
+		CONTRIBUTOR_COST,
+	),
+	museFallbackModel("muse-spark-1.2", "Muse Spark 1.2", STANDARD_COST),
+	museFallbackModel(
+		"muse-spark-1.2-contributor",
+		"Muse Spark 1.2 Contributor",
+		CONTRIBUTOR_COST,
+	),
+	museFallbackModel("muse-spark-1.1", "Muse Spark 1.1", STANDARD_COST),
 ];
 
 type MetaEnv = Record<string, string | undefined>;
@@ -231,23 +198,38 @@ function fallbackModels(): MetaProviderModel[] {
 	return FALLBACK_MODELS.map((model) => gateMuseMaxEffort(model));
 }
 
+function fallbackModel(id: string): MetaProviderModel | undefined {
+	const model = FALLBACK_MODELS.find((candidate) => candidate.id === id);
+	return model && gateMuseMaxEffort(model);
+}
+
 function delay(milliseconds: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function responseBody(
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function finitePositive(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0
+		? value
+		: fallback;
+}
+
+async function responseBody<T = unknown>(
 	response: Response,
-): Promise<Record<string, unknown>> {
+): Promise<T & Record<string, unknown>> {
 	const text = await response.text();
-	if (!text) return {};
+	let value: unknown;
 	try {
-		const value = JSON.parse(text) as unknown;
-		return value && typeof value === "object" && !Array.isArray(value)
-			? (value as Record<string, unknown>)
-			: {};
+		value = text ? JSON.parse(text) : undefined;
 	} catch {
-		return {};
+		value = undefined;
 	}
+	return (asRecord(value) ?? {}) as T & Record<string, unknown>;
 }
 
 function errorDetail(body: Record<string, unknown>): string | undefined {
@@ -256,6 +238,12 @@ function errorDetail(body: Record<string, unknown>): string | undefined {
 		if (typeof value === "string" && value.trim()) return value.trim();
 	}
 	return undefined;
+}
+
+/** `message`, suffixed with the server's error detail when it sent one. */
+function detailedError(message: string, body: Record<string, unknown>): Error {
+	const detail = errorDetail(body);
+	return new Error(detail ? `${message}: ${detail}` : message);
 }
 
 async function postForm<T>(
@@ -272,10 +260,7 @@ async function postForm<T>(
 		body: new URLSearchParams(fields),
 		redirect: "manual",
 	});
-	return {
-		response,
-		body: (await responseBody(response)) as T & Record<string, unknown>,
-	};
+	return { response, body: await responseBody<T>(response) };
 }
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -298,22 +283,18 @@ export async function mintMetaApiKey(
 			Accept: "application/json",
 			Authorization: `Bearer ${identityToken}`,
 			"Content-Type": "application/json",
-			"x-api-version": "1.0.0",
+			"x-api-version": META_API_VERSION,
 		},
 		body: "{}",
 		signal,
 	});
-	const body = (await responseBody(response)) as MintResponse &
-		Record<string, unknown>;
+	const body = await responseBody<MintResponse>(response);
 	if (!response.ok) {
-		const detail = errorDetail(body);
-		if (response.status === 401 || response.status === 403) {
-			throw new Error(
-				`Meta session expired (HTTP ${response.status}); run /login meta again${detail ? `: ${detail}` : ""}`,
-			);
-		}
-		throw new Error(
-			`Meta API-key mint failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`,
+		throw detailedError(
+			response.status === 401 || response.status === 403
+				? `Meta session expired (HTTP ${response.status}); run /login meta again`
+				: `Meta API-key mint failed (HTTP ${response.status})`,
+			body,
 		);
 	}
 	if (typeof body.api_key !== "string" || !body.api_key) {
@@ -326,61 +307,50 @@ export async function mintMetaApiKey(
 	return body.api_key;
 }
 
-export async function loginMeta(
-	callbacks: OAuthLoginCallbacks,
-	fetchImpl: Fetch = fetch,
-	sleep: Sleep = delay,
-): Promise<OAuthCredentials> {
-	callbacks.onProgress?.("Starting Meta device authorization…");
-	const authorization = await postForm<DeviceAuthorization>(
+function apiKeyExpiry(): number {
+	return Date.now() + API_KEY_REFRESH_INTERVAL_MS;
+}
+
+async function startDeviceAuthorization(
+	fetchImpl: Fetch,
+): Promise<DeviceAuthorization> {
+	const { response, body } = await postForm<DeviceAuthorization>(
 		DEVICE_AUTHORIZATION_URL,
 		{ client_id: META_CLIENT_ID },
 		fetchImpl,
 	);
-	if (!authorization.response.ok) {
-		throw new Error(
-			`Meta login could not be started (HTTP ${authorization.response.status})${errorDetail(authorization.body) ? `: ${errorDetail(authorization.body)}` : ""}`,
+	if (!response.ok) {
+		throw detailedError(
+			`Meta login could not be started (HTTP ${response.status})`,
+			body,
 		);
 	}
-	const device = authorization.body;
-	if (!device.device_code || !device.user_code || !device.verification_uri) {
+	if (!body.device_code || !body.user_code || !body.verification_uri) {
 		throw new Error("Meta device authorization returned an incomplete response");
 	}
+	return body;
+}
 
-	let intervalSeconds =
-		Number.isFinite(device.interval) && Number(device.interval) > 0
-			? Number(device.interval)
-			: 5;
-	const expiresInSeconds =
-		Number.isFinite(device.expires_in) && Number(device.expires_in) > 0
-			? Number(device.expires_in)
-			: 900;
-	const deadline = Date.now() + expiresInSeconds * 1000;
-	callbacks.onDeviceCode({
-		userCode: device.user_code,
-		verificationUri: device.verification_uri_complete || device.verification_uri,
-		intervalSeconds,
-		expiresInSeconds,
-	});
-	callbacks.onProgress?.("Waiting for Meta login approval…");
-
-	let identityToken: string | undefined;
+async function pollForIdentityToken(
+	deviceCode: string,
+	intervalSeconds: number,
+	deadline: number,
+	fetchImpl: Fetch,
+	sleep: Sleep,
+): Promise<string> {
 	while (Date.now() < deadline) {
 		await sleep(intervalSeconds * 1000);
-		const grant = await postForm<DeviceTokenGrant & OAuthError>(
+		const { response, body } = await postForm<DeviceTokenResponse>(
 			DEVICE_TOKEN_URL,
 			{
 				grant_type: DEVICE_CODE_GRANT,
-				device_code: device.device_code,
+				device_code: deviceCode,
 				client_id: META_CLIENT_ID,
 			},
 			fetchImpl,
 		);
-		if (grant.response.ok && grant.body.access_token) {
-			identityToken = grant.body.access_token;
-			break;
-		}
-		switch (grant.body.error) {
+		if (response.ok && body.access_token) return body.access_token;
+		switch (body.error) {
 			case "authorization_pending":
 				continue;
 			case "slow_down":
@@ -391,19 +361,43 @@ export async function loginMeta(
 			case "expired_token":
 				throw new Error("Meta login request expired");
 			default:
-				throw new Error(
-					`Meta login failed (HTTP ${grant.response.status})${errorDetail(grant.body) ? `: ${errorDetail(grant.body)}` : ""}`,
-				);
+				throw detailedError(`Meta login failed (HTTP ${response.status})`, body);
 		}
 	}
-	if (!identityToken) throw new Error("Meta login request expired");
+	throw new Error("Meta login request expired");
+}
+
+export async function loginMeta(
+	callbacks: OAuthLoginCallbacks,
+	fetchImpl: Fetch = fetch,
+	sleep: Sleep = delay,
+): Promise<OAuthCredentials> {
+	callbacks.onProgress?.("Starting Meta device authorization…");
+	const device = await startDeviceAuthorization(fetchImpl);
+
+	const intervalSeconds = finitePositive(device.interval, 5);
+	const expiresInSeconds = finitePositive(device.expires_in, 900);
+	const deadline = Date.now() + expiresInSeconds * 1000;
+	callbacks.onDeviceCode({
+		userCode: device.user_code,
+		verificationUri: device.verification_uri_complete || device.verification_uri,
+		intervalSeconds,
+		expiresInSeconds,
+	});
+	callbacks.onProgress?.("Waiting for Meta login approval…");
+	const identityToken = await pollForIdentityToken(
+		device.device_code,
+		intervalSeconds,
+		deadline,
+		fetchImpl,
+		sleep,
+	);
 
 	callbacks.onProgress?.("Enabling Meta Model API access…");
-	const apiKey = await mintMetaApiKey(identityToken, fetchImpl);
 	return {
 		refresh: identityToken,
-		access: apiKey,
-		expires: Date.now() + API_KEY_REFRESH_INTERVAL_MS,
+		access: await mintMetaApiKey(identityToken, fetchImpl),
+		expires: apiKeyExpiry(),
 	};
 }
 
@@ -425,14 +419,8 @@ export async function refreshMetaToken(
 	return {
 		...credentials,
 		access: await mintMetaApiKey(credentials.refresh, fetchImpl, signal),
-		expires: Date.now() + API_KEY_REFRESH_INTERVAL_MS,
+		expires: apiKeyExpiry(),
 	};
-}
-
-function finitePositive(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0
-		? value
-		: fallback;
 }
 
 function numericCost(value: unknown, fallback: number): number {
@@ -470,18 +458,13 @@ export function toProviderModels(
 		const metadata = entry.metadata?.["muse-code"];
 		if (metadata?.is_hidden) return [];
 		// Gated fallbacks: a server-advertised variants.max still wins below.
-		const fallback = fallbackModels().find((model) => model.id === entry.id);
+		const fallback = fallbackModel(entry.id);
 		const catalogName = metadata?.name === entry.id ? undefined : metadata?.name;
 		const variants = metadata?.variants ?? {};
-		const thinkingLevelMap: NonNullable<MetaProviderModel["thinkingLevelMap"]> = {
-			off: null,
-			minimal: variants.minimal?.reasoningEffort ?? "minimal",
-			low: variants.low?.reasoningEffort ?? "low",
-			medium: variants.medium?.reasoningEffort ?? "medium",
-			high: variants.high?.reasoningEffort ?? "high",
-			xhigh: variants.xhigh?.reasoningEffort ?? "xhigh",
-			max: variants.max?.reasoningEffort ?? fallback?.thinkingLevelMap?.max ?? null,
-		};
+		const thinkingLevelMap = buildThinkingLevelMap(
+			(level) => variants[level]?.reasoningEffort ?? level,
+			variants.max?.reasoningEffort ?? fallback?.thinkingLevelMap?.max ?? null,
+		);
 		return [
 			{
 				id: entry.id,
@@ -500,13 +483,13 @@ export function toProviderModels(
 				},
 				contextWindow: finitePositive(
 					metadata?.limit?.context,
-					fallback?.contextWindow ?? 1_048_576,
+					fallback?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
 				),
 				maxTokens: finitePositive(
 					metadata?.limit?.output,
-					fallback?.maxTokens ?? 256_000,
+					fallback?.maxTokens ?? DEFAULT_MAX_TOKENS,
 				),
-				compat: { supportsReasoningEffort: true, supportsToolSearch: true },
+				compat: museCompat(),
 			} satisfies MetaProviderModel,
 		];
 	});
@@ -580,6 +563,13 @@ async function cachedMetaModels(
 	}
 }
 
+async function cachedOrFallbackModels(
+	context: CompatibleRefreshContext,
+): Promise<MetaProviderModel[]> {
+	const cached = await cachedMetaModels(context);
+	return cached.length > 0 ? cached : fallbackModels();
+}
+
 async function persistMetaModels(
 	context: CompatibleRefreshContext,
 	entry: ModelsStoreEntry,
@@ -591,6 +581,34 @@ async function persistMetaModels(
 	await context.store?.write(entry);
 }
 
+function credentialApiKey(
+	credential: RefreshModelsContext["credential"],
+): string | undefined {
+	if (credential?.type === "oauth") return credential.access;
+	if (credential?.type === "api_key") return credential.key;
+	return undefined;
+}
+
+async function fetchMetaCatalog(
+	apiKey: string,
+	fetchImpl: Fetch,
+	signal: AbortSignal | undefined,
+): Promise<MetaProviderModel[]> {
+	const response = await fetchImpl(META_MODEL_CATALOG_URL, {
+		headers: {
+			Accept: "application/json",
+			Authorization: `Bearer ${apiKey}`,
+			"x-api-version": META_API_VERSION,
+		},
+		signal,
+	});
+	const body = await responseBody<CatalogResponse>(response);
+	if (!response.ok) {
+		throw detailedError(`Meta model catalog failed (HTTP ${response.status})`, body);
+	}
+	return toProviderModels(body);
+}
+
 export async function refreshMetaModels(
 	context: RefreshModelsContext,
 	fetchImpl: Fetch = fetch,
@@ -598,42 +616,14 @@ export async function refreshMetaModels(
 	// SAFETY: CompatibleRefreshContext is the union of the Pi 0.83 and 0.84
 	// refresh-context fields that this adapter probes defensively at runtime.
 	const compatibleContext = context as unknown as CompatibleRefreshContext;
-	if (!context.allowNetwork || context.signal?.aborted) {
-		const cached = await cachedMetaModels(compatibleContext);
-		return cached.length > 0 ? cached : fallbackModels();
-	}
-	const apiKey =
-		context.credential?.type === "oauth"
-			? context.credential.access
-			: context.credential?.type === "api_key"
-				? context.credential.key
-				: undefined;
-	if (!apiKey) {
-		const cached = await cachedMetaModels(compatibleContext);
-		return cached.length > 0 ? cached : fallbackModels();
+	const apiKey = credentialApiKey(context.credential);
+	if (!context.allowNetwork || context.signal?.aborted || !apiKey) {
+		return cachedOrFallbackModels(compatibleContext);
 	}
 
 	try {
-		const response = await fetchImpl(META_MODEL_CATALOG_URL, {
-			headers: {
-				Accept: "application/json",
-				Authorization: `Bearer ${apiKey}`,
-				"x-api-version": "1.0.0",
-			},
-			signal: context.signal,
-		});
-		const body = (await responseBody(response)) as CatalogResponse &
-			Record<string, unknown>;
-		if (!response.ok) {
-			throw new Error(
-				`Meta model catalog failed (HTTP ${response.status})${errorDetail(body) ? `: ${errorDetail(body)}` : ""}`,
-			);
-		}
-		const models = toProviderModels(body);
-		if (models.length === 0) {
-			const cached = await cachedMetaModels(compatibleContext);
-			return cached.length > 0 ? cached : fallbackModels();
-		}
+		const models = await fetchMetaCatalog(apiKey, fetchImpl, context.signal);
+		if (models.length === 0) return cachedOrFallbackModels(compatibleContext);
 		if (!context.signal?.aborted) {
 			try {
 				await persistMetaModels(compatibleContext, {
@@ -647,25 +637,12 @@ export async function refreshMetaModels(
 		return models;
 	} catch (error) {
 		if (context.signal?.aborted) throw error;
-		const cached = await cachedMetaModels(compatibleContext);
-		return cached.length > 0 ? cached : fallbackModels();
+		return cachedOrFallbackModels(compatibleContext);
 	}
-}
-
-export function metaFallbackCost(
-	modelId: string,
-): MetaProviderModel["cost"] | undefined {
-	return FALLBACK_MODELS.find((model) => model.id === modelId)?.cost;
 }
 
 /** Meta prompt-cache opt-in. Measured 0% hits on /chat/completions vs 93–99% on /responses with 24h. */
 export const META_PROMPT_CACHE_RETENTION = "24h";
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return value !== null && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: undefined;
-}
 
 /**
  * Strict direct-endpoint check: https scheme, api.meta.ai hostname
@@ -728,12 +705,7 @@ export function applyMetaResponsesCacheHints(
 		body.prompt_cache_retention = META_PROMPT_CACHE_RETENTION;
 	}
 	const reasoning = asRecord(body.reasoning);
-	if (
-		reasoning &&
-		(reasoning.effort === "none" ||
-			reasoning.effort === undefined ||
-			reasoning.effort === null)
-	) {
+	if (reasoning && (reasoning.effort == null || reasoning.effort === "none")) {
 		delete body.reasoning;
 	}
 	return body;
@@ -756,20 +728,20 @@ export function createMetaProviderConfig(): ProviderConfig {
 	};
 }
 
+/**
+ * Accept MODEL_API_KEY as an alias for API-key users: mirror whichever of the
+ * two is set into the other so `$META_API_KEY` interpolation works. A key that
+ * is already set is never overwritten.
+ */
+function mirrorApiKeyEnv(env: MetaEnv = process.env): void {
+	const key = env[META_ENV_VAR] ?? env[MODEL_API_KEY_ENV_VAR];
+	if (key === undefined) return;
+	env[META_ENV_VAR] ??= key;
+	env[MODEL_API_KEY_ENV_VAR] ??= key;
+}
+
 export default function metaOAuthProvider(pi: ExtensionAPI): void {
-	// Allow MODEL_API_KEY as fallback for API-key users — shim to META_API_KEY so $META_API_KEY interpolation works.
-	if (
-		process.env[META_ENV_VAR] === undefined &&
-		process.env["MODEL_API_KEY"] !== undefined
-	) {
-		process.env[META_ENV_VAR] = process.env["MODEL_API_KEY"];
-	}
-	if (
-		process.env["MODEL_API_KEY"] === undefined &&
-		process.env[META_ENV_VAR] !== undefined
-	) {
-		process.env["MODEL_API_KEY"] = process.env[META_ENV_VAR];
-	}
+	mirrorApiKeyEnv();
 	pi.registerProvider(META_PROVIDER_ID, createMetaProviderConfig());
 	pi.on("before_provider_request", (event, ctx) => {
 		if (ctx.model?.provider !== META_PROVIDER_ID) return undefined;
