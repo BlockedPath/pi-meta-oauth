@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Honor login cancellation throughout device authorization, polling, and key minting, and stop polling when the device code expires.
 - Validate malformed catalog and credential responses and return independent fallback/cache model metadata.
 - Require Contributor literal `max` opt-in even when the catalog advertises it, and limit the Muse fingerprint to the bare direct endpoint.
+- Keep the Meta catalog in `models-store.json` on Pi 0.86.1 and later, where Pi's built-in pi.dev `meta` overlay shares the store entry and refreshes first. The extension persists its catalog with `lastModified: 0` and a `source` marker so the overlay skips pi.dev while the Meta catalog is fresh. It ignores overlay-written entries on restore, republishes its last good catalog after a failed Meta refresh, and always restores `https://api.meta.ai/v1` as the base URL.
+- Bound each device-authorization, token-poll, and key-mint request to 30 seconds, and token polls also to the device-code deadline, so a stalled connection fails with a timeout or expiry error instead of hanging login or Pi 0.83 refreshes.
+- Report Pi's refresh timeout as `Meta token refresh timed out` instead of a cancellation.
+- Accept only http(s) verification and setup URLs from Meta, normalized like Pi's built-in Meta login so control characters cannot reach the terminal.
+- Apply the Responses cache hints only when the payload's model is the session's Meta model, so a mid-request model switch cannot rewrite another provider's request.
+- Treat an empty or blank `META_API_KEY` or `MODEL_API_KEY` as unset when mirroring the two aliases.
+- Point the README install command at the npm package or `main` instead of the stale v0.6.0 `meta-oauth-only` branch.
 
 ## [0.7.0] - 2026-09-26
 

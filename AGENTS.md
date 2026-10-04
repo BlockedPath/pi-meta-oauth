@@ -32,6 +32,8 @@ Keep both Pi refresh-context shapes working:
 - Pi 0.83: mutable `store` read/write API
 - Pi 0.84: immutable `stored` snapshot plus generation-checked `publish`
 
+On Pi 0.86.1+, Pi's built-in pi.dev `meta` catalog overlay refreshes before this extension through the same `models-store.json` entry. Keep persisted entries marked with `lastModified: 0` and `source: "pi-meta-oauth"`, restore only owned (or legacy unmarked) entries, and pin restored `baseUrl` to `https://api.meta.ai/v1`. `tests/model-runtime.test.ts` drives the real Pi `ModelRuntime` and skips on Pi versions without the built-in provider.
+
 Hermetic OAuth and catalog tests live in `tests/meta.test.ts`. Failure-path and wire-shape tests (exact error messages, polling back-off, request shapes, catalog fallbacks, bundled model table) live in `tests/meta-failures.test.ts`.
 
 ## Prompt caching

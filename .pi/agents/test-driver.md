@@ -20,7 +20,7 @@ Procedure:
 
 1. Detect the test command first — check `package.json` scripts (test / test:unit / etc.), then common defaults (`bun test`, `npm test`, `yarn test`, `cargo test`, `go test ./...`, `pytest`). Run it and capture the failures.
 2. For each failing test, read the test file and the code it exercises. Distinguish the failure kinds: assertion expectation drift, missing edge case, broken logic, environment/ordering issue, or a test that is simply wrong. Never change a test's expectations to force green without flagging it as a decision.
-3. Fix the underlying cause with minimal edits that match the codebase's existing patterns. After each fix, rerun the targeted failing test first (e.g. `bun test <file>` or `bun test -t <name>`), then the full suite.
+3. Fix the underlying cause with minimal edits that match the codebase's existing patterns. After each fix, rerun the targeted failing test first (e.g. `bun run test <file>` or `bun run test -t <name>`), then the full suite.
 4. Keep the loop tight: one failure cluster at a time, don't batch half-understood edits. If a fix doesn't change the outcome, stop guessing and investigate — read the surrounding code and error stack before editing again.
 
 Hard rules:
