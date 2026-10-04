@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type {
 	ModelsStoreEntry,
 	OAuthLoginCallbacks,
@@ -16,6 +16,7 @@ import metaOAuthProvider, {
 	refreshMetaModels,
 	refreshMetaToken,
 } from "../extensions/meta.ts";
+import { META_REQUEST_TIMEOUT_MS } from "../src/meta/constants.ts";
 import { withMuseUserAgent } from "./muse-env.ts";
 
 // Characterization tests for the failure, fallback, and wire-shape paths of
@@ -40,6 +41,24 @@ function scriptedFetch(...responses: Array<Response | Error>) {
 		if (!next) throw new Error("Unexpected request");
 		if (next instanceof Error) throw next;
 		return next;
+	}) as unknown as typeof fetch;
+	return { fetchMock, requests };
+}
+
+/** Answer with the scripted responses, then stall until the request aborts. */
+function stallingFetch(...responses: Response[]) {
+	const requests: Array<{ url: string; init?: RequestInit }> = [];
+	const fetchMock = (async (
+		input: string | URL | Request,
+		init?: RequestInit,
+	) => {
+		requests.push({ url: String(input), init });
+		const next = responses.shift();
+		if (next) return next;
+		return new Promise<Response>((_resolve, reject) => {
+			const signal = init?.signal;
+			signal?.addEventListener("abort", () => reject(signal.reason));
+		});
 	}) as unknown as typeof fetch;
 	return { fetchMock, requests };
 }
@@ -168,6 +187,64 @@ describe("Meta device login failures", () => {
 		expect(
 			await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
 		).toBe("Meta device authorization returned an incomplete response");
+	});
+
+	async function forwardedVerificationUri(
+		extra: Record<string, unknown>,
+	): Promise<unknown> {
+		const deviceCodes: Array<{ verificationUri?: unknown }> = [];
+		const { fetchMock } = scriptedFetch(
+			deviceAuthorization(extra),
+			jsonResponse({ access_token: "identity-token" }),
+			jsonResponse({ api_key: "model-api-key" }),
+		);
+		await loginMeta(loginCallbacks({ deviceCodes }), fetchMock, noSleep);
+		return deviceCodes[0]?.verificationUri;
+	}
+
+	for (const complete of [
+		"javascript:alert(1)",
+		"file:///etc/passwd",
+		"not a URL",
+	]) {
+		test(`falls back to verification_uri when the complete URI is ${complete}`, async () => {
+			expect(
+				await forwardedVerificationUri({
+					verification_uri_complete: complete,
+				}),
+			).toBe("https://auth.meta.com/device");
+		});
+	}
+
+	for (const uri of ["javascript:alert(1)", "file:///etc/passwd"]) {
+		test(`rejects a ${uri} verification URI without a trusted fallback`, async () => {
+			const { fetchMock, requests } = scriptedFetch(
+				deviceAuthorization({ verification_uri: uri }),
+			);
+			expect(
+				await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
+			).toBe("Meta device authorization returned an incomplete response");
+			expect(requests).toHaveLength(1);
+		});
+	}
+
+	test("percent-encodes control characters before Pi renders the link", async () => {
+		expect(
+			await forwardedVerificationUri({
+				verification_uri_complete:
+					"https://auth.meta.com/device\x07\x1b]52;c;AAAA\x07\x1b[2J",
+			}),
+		).toBe("https://auth.meta.com/device%07%1B]52;c;AAAA%07%1B[2J");
+	});
+
+	test("accepts a trusted complete URI without verification_uri", async () => {
+		expect(
+			await forwardedVerificationUri({
+				verification_uri: undefined,
+				verification_uri_complete:
+					"https://auth.meta.com/device?code=ABCD-1234",
+			}),
+		).toBe("https://auth.meta.com/device?code=ABCD-1234");
 	});
 
 	test("expires when approval never arrives before the deadline", async () => {
@@ -374,6 +451,28 @@ describe("Meta API-key minting failures", () => {
 		);
 	});
 
+	for (const actionUrl of ["javascript:x", "file:///etc/passwd", "billing"]) {
+		test(`omits an untrusted setup link (${actionUrl})`, async () => {
+			const { fetchMock } = scriptedFetch(
+				jsonResponse({ action_url: actionUrl }),
+			);
+			expect(
+				await rejectionMessage(mintMetaApiKey("identity-token", fetchMock)),
+			).toBe("Meta did not issue an API key.");
+		});
+	}
+
+	test("percent-encodes control characters in the setup link", async () => {
+		const { fetchMock } = scriptedFetch(
+			jsonResponse({ action_url: "https://dev.meta.ai/billing\x1b[2J" }),
+		);
+		expect(
+			await rejectionMessage(mintMetaApiKey("identity-token", fetchMock)),
+		).toBe(
+			"Meta did not issue an API key. Complete setup at https://dev.meta.ai/billing%1B[2J.",
+		);
+	});
+
 	test("requires an identity token to refresh", async () => {
 		expect(
 			await rejectionMessage(
@@ -382,13 +481,17 @@ describe("Meta API-key minting failures", () => {
 		).toBe("Meta login is missing its identity token; run /login meta again");
 	});
 
-	test("forwards the AbortSignal to the mint request", async () => {
-		const signal = new AbortController().signal;
+	test("ties the mint request to the caller's AbortSignal", async () => {
+		const controller = new AbortController();
 		const { fetchMock, requests } = scriptedFetch(
 			jsonResponse({ api_key: "key" }),
 		);
-		await mintMetaApiKey("identity-token", fetchMock, signal);
-		expect(requests[0]?.init?.signal).toBe(signal);
+		await mintMetaApiKey("identity-token", fetchMock, controller.signal);
+		const signal = requests[0]?.init?.signal;
+		expect(signal?.aborted).toBe(false);
+		controller.abort();
+		expect(signal?.aborted).toBe(true);
+		expect(signal?.reason).toBe(controller.signal.reason);
 	});
 
 	test("keeps other credential fields and extends expiry on refresh", async () => {
@@ -412,6 +515,127 @@ describe("Meta API-key minting failures", () => {
 			accountId: "acct-1",
 		});
 		expect(refreshed.expires).toBeGreaterThanOrEqual(before + 86_400_000);
+	});
+});
+
+describe("Meta request timeouts", () => {
+	const credentials = { refresh: "identity-token", access: "old", expires: 0 };
+
+	/** Shrink every request timeout to 20ms and record the requested length. */
+	async function withShortTimeouts(
+		run: (requested: number[]) => Promise<void>,
+	): Promise<void> {
+		const timeout = AbortSignal.timeout.bind(AbortSignal);
+		const requested: number[] = [];
+		const spy = spyOn(AbortSignal, "timeout").mockImplementation(
+			(milliseconds: number) => {
+				requested.push(milliseconds);
+				return timeout(20);
+			},
+		);
+		try {
+			await run(requested);
+		} finally {
+			spy.mockRestore();
+		}
+	}
+
+	async function withStalledGlobalFetch(run: () => Promise<void>) {
+		const { fetchMock } = stallingFetch();
+		const spy = spyOn(globalThis, "fetch").mockImplementation(fetchMock);
+		try {
+			await run();
+		} finally {
+			spy.mockRestore();
+		}
+	}
+
+	test("expires a stalled token poll at the device-code deadline", async () => {
+		const { fetchMock, requests } = stallingFetch(
+			deviceAuthorization({ interval: 0.05, expires_in: 0.2 }),
+		);
+		const started = Date.now();
+		expect(
+			await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
+		).toBe("Meta login request expired");
+		expect(Date.now() - started).toBeLessThan(1000);
+		expect(requests).toHaveLength(2);
+	});
+
+	test("times out a stalled device authorization after 30 seconds", async () => {
+		await withShortTimeouts(async (requested) => {
+			const { fetchMock } = stallingFetch();
+			expect(
+				await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
+			).toBe("Meta login request timed out");
+			expect(requested).toEqual([META_REQUEST_TIMEOUT_MS]);
+		});
+	});
+
+	test("times out a stalled token poll well before the deadline", async () => {
+		await withShortTimeouts(async (requested) => {
+			const { fetchMock, requests } = stallingFetch(deviceAuthorization());
+			expect(
+				await rejectionMessage(loginMeta(loginCallbacks(), fetchMock, noSleep)),
+			).toBe("Meta login request timed out");
+			expect(requested).toEqual([
+				META_REQUEST_TIMEOUT_MS,
+				META_REQUEST_TIMEOUT_MS,
+			]);
+			expect(requests).toHaveLength(2);
+		});
+	});
+
+	for (const signal of [undefined, new AbortController().signal]) {
+		test(`times out a stalled mint ${signal ? "with" : "without"} a caller signal`, async () => {
+			const { fetchMock } = stallingFetch();
+			expect(
+				await rejectionMessage(
+					mintMetaApiKey("identity-token", fetchMock, signal, 20),
+				),
+			).toBe("Meta API-key mint timed out");
+		});
+	}
+
+	test("bounds a Pi 0.83 refresh, which passes no signal", async () => {
+		await withShortTimeouts(async (requested) => {
+			await withStalledGlobalFetch(async () => {
+				expect(await rejectionMessage(refreshMetaToken(credentials))).toBe(
+					"Meta API-key mint timed out",
+				);
+			});
+			expect(requested).toEqual([META_REQUEST_TIMEOUT_MS]);
+		});
+	});
+
+	test("reports Pi's refresh timeout as a timeout, not a cancellation", async () => {
+		await withStalledGlobalFetch(async () => {
+			expect(
+				await rejectionMessage(
+					refreshMetaToken(credentials, AbortSignal.timeout(20)),
+				),
+			).toBe("Meta token refresh timed out");
+		});
+	});
+
+	test("still reports a caller abort during a stalled request as cancelled", async () => {
+		await withStalledGlobalFetch(async () => {
+			const controller = new AbortController();
+			const refresh = refreshMetaToken(credentials, controller.signal);
+			setTimeout(() => controller.abort(), 10);
+			expect(await rejectionMessage(refresh)).toBe(
+				"Meta token refresh was cancelled",
+			);
+		});
+		const controller = new AbortController();
+		const { fetchMock } = stallingFetch(deviceAuthorization());
+		const login = loginMeta(
+			{ ...loginCallbacks(), signal: controller.signal } as OAuthLoginCallbacks,
+			fetchMock,
+			noSleep,
+		);
+		setTimeout(() => controller.abort(), 10);
+		expect(await rejectionMessage(login)).toBe("Meta login was cancelled");
 	});
 });
 

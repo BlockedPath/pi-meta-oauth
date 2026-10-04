@@ -360,9 +360,13 @@ describe("Meta device OAuth", () => {
 				loginMeta(cancellableCallbacks, fetchImpl, clock.sleep, clock.now),
 			).rejects.toThrow("Meta login was cancelled");
 			expect(signals).toHaveLength(requestCount);
-			expect(signals.every((signal) => signal === controller.signal)).toBe(
-				true,
-			);
+			// Each request signal follows Pi's signal as well as its own timeout.
+			expect(
+				signals.every(
+					(signal) =>
+						signal?.aborted && signal.reason === controller.signal.reason,
+				),
+			).toBe(true);
 			expect(deviceCodes).toHaveLength(phase === "authorization" ? 0 : 1);
 		});
 	}
@@ -502,8 +506,10 @@ describe("Meta key minting and refresh", () => {
 	test("refresh passes Pi's cancellation signal to mint and rejects a late cancellation", async () => {
 		const controller = new AbortController();
 		let receivedSignal: AbortSignal | null | undefined;
+		let abortedBeforePi: boolean | undefined;
 		const fetchImpl: Fetch = async (_input, init) => {
 			receivedSignal = init?.signal;
+			abortedBeforePi = receivedSignal?.aborted;
 			controller.abort();
 			return jsonResponse({ api_key: "new-key" });
 		};
@@ -517,7 +523,10 @@ describe("Meta key minting and refresh", () => {
 					controller.signal,
 				),
 			).rejects.toThrow("Meta token refresh was cancelled");
-			expect(receivedSignal).toBe(controller.signal);
+			// The mint signal adds a request timeout but still aborts with Pi's.
+			expect(abortedBeforePi).toBe(false);
+			expect(receivedSignal?.aborted).toBe(true);
+			expect(receivedSignal?.reason).toBe(controller.signal.reason);
 		} finally {
 			fetchSpy.mockRestore();
 		}
