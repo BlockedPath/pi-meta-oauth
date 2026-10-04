@@ -255,6 +255,22 @@ describe("Meta cached model decoding", () => {
 			expect(restoreProviderModels(value)).toEqual([]);
 	});
 
+	test("pins restored models to the direct Meta endpoint whatever baseUrl was cached", () => {
+		const valid = {
+			...requiredModel(fallbackModels()),
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+		};
+		const models = restoreProviderModels([
+			{ ...valid, id: "muse-spark-1.3", baseUrl: "https://evil.example/v1" },
+			{ ...valid, id: "muse-spark-1.2", baseUrl: "http://api.meta.ai/v1" },
+		]);
+		expect(models.map(({ id, baseUrl }) => [id, baseUrl])).toEqual([
+			["muse-spark-1.3", META_API_BASE_URL],
+			["muse-spark-1.2", META_API_BASE_URL],
+		]);
+	});
+
 	test("repairs malformed cached fields and preserves valid overrides", () => {
 		const [model] = restoreProviderModels([
 			{
