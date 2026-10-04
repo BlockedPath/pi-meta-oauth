@@ -953,10 +953,11 @@ describe("Meta extension entry point", () => {
 				register,
 			),
 		).toEqual({ META_API_KEY: "meta", MODEL_API_KEY: "model" });
+		// Pi resolves $META_API_KEY with `||`, so an empty value is not set.
 		expect(
 			await withKeys({ META_API_KEY: "", MODEL_API_KEY: "model" }, register),
 		).toEqual({
-			META_API_KEY: "",
+			META_API_KEY: "model",
 			MODEL_API_KEY: "model",
 		});
 	});
