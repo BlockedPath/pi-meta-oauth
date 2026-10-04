@@ -13,9 +13,26 @@ test.each([
 		{ META_API_KEY: "meta", MODEL_API_KEY: "model" },
 		{ META_API_KEY: "meta", MODEL_API_KEY: "model" },
 	],
+	// Pi treats an empty $META_API_KEY as unset, and a blank one is never a usable key.
 	[
 		{ META_API_KEY: "", MODEL_API_KEY: "model" },
-		{ META_API_KEY: "", MODEL_API_KEY: "model" },
+		{ META_API_KEY: "model", MODEL_API_KEY: "model" },
+	],
+	[
+		{ META_API_KEY: "   ", MODEL_API_KEY: "model" },
+		{ META_API_KEY: "model", MODEL_API_KEY: "model" },
+	],
+	[
+		{ META_API_KEY: "meta", MODEL_API_KEY: "" },
+		{ META_API_KEY: "meta", MODEL_API_KEY: "meta" },
+	],
+	[
+		{ META_API_KEY: "", MODEL_API_KEY: "" },
+		{ META_API_KEY: "", MODEL_API_KEY: "" },
+	],
+	[
+		{ META_API_KEY: "   ", MODEL_API_KEY: " " },
+		{ META_API_KEY: "   ", MODEL_API_KEY: " " },
 	],
 ])("synchronizes only missing API key aliases (%j)", (initial, expected) => {
 	const env: MetaEnv = { ...initial };

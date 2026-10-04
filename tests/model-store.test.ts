@@ -47,6 +47,30 @@ function cachedCatalog(id = "muse-cached"): ModelsStoreEntry {
 	};
 }
 
+const STORE_SOURCE = "pi-meta-oauth";
+
+/** The marked shape this extension persists since sharing `meta` with Pi's pi.dev overlay. */
+function ownedCatalog(
+	id = "muse-cached",
+): ModelsStoreEntry & { source: string } {
+	return {
+		...cachedCatalog(id),
+		checkedAt: 1234,
+		lastModified: 0,
+		source: STORE_SOURCE,
+	};
+}
+
+/** The shape Pi's pi.dev overlay writes to the same `meta` store key. */
+function overlayCatalog(): ModelsStoreEntry {
+	return {
+		...cachedCatalog("muse-pidev"),
+		checkedAt: Date.now(),
+		lastModified: Date.now(),
+		etag: '"pidev"',
+	};
+}
+
 function fetchMock(
 	handler: (...args: Parameters<Fetch>) => Promise<Response>,
 ): Fetch {
@@ -123,6 +147,8 @@ describe("Meta catalog persistence compatibility", () => {
 			baseUrl: META_API_BASE_URL,
 		});
 		expect(persisted?.checkedAt).toBeGreaterThan(0);
+		expect(persisted).toMatchObject({ lastModified: 0, source: STORE_SOURCE });
+		expect(persisted).not.toHaveProperty("etag");
 		stored.cost.input = 42;
 		stored.input.length = 0;
 		if (stored.thinkingLevelMap) stored.thinkingLevelMap.high = "changed";
@@ -132,6 +158,28 @@ describe("Meta catalog persistence compatibility", () => {
 		expect(fresh.input).toEqual(["text"]);
 		expect(fresh.thinkingLevelMap?.high).toBe("high");
 		expect(fresh.compat).toMatchObject({ supportsToolSearch: true });
+	});
+
+	test("publishes a marked entry that Pi's pi.dev overlay treats as fresh", async () => {
+		let persisted: ModelsStoreEntry | null | undefined;
+		const before = Date.now();
+		await refreshMetaModels(
+			refreshContext({
+				publish: async (publication: { persist?: ModelsStoreEntry | null }) => {
+					persisted = publication.persist;
+					return true;
+				},
+			}),
+			catalogFetch(),
+		);
+		expect(Object.keys(persisted ?? {}).sort()).toEqual([
+			"checkedAt",
+			"lastModified",
+			"models",
+			"source",
+		]);
+		expect(persisted).toMatchObject({ lastModified: 0, source: STORE_SOURCE });
+		expect(persisted?.checkedAt).toBeGreaterThanOrEqual(before);
 	});
 
 	test("prefers generation-checked publish and never falls through to a legacy write after rejection", async () => {
@@ -220,6 +268,65 @@ describe("Meta catalog persistence compatibility", () => {
 		});
 	}
 
+	for (const [name, stored] of [
+		["marked", ownedCatalog()],
+		["legacy unmarked", cachedCatalog()],
+	] as const) {
+		for (const api of ["stored", "store"] as const) {
+			test(`restores a ${name} entry from the ${api} API`, async () => {
+				const context = refreshContext(
+					api === "stored"
+						? { allowNetwork: false, stored }
+						: { allowNetwork: false, store: { read: async () => stored } },
+				);
+				expect(
+					(await refreshMetaModels(context, unavailableFetch))[0]?.id,
+				).toBe("muse-cached");
+			});
+		}
+	}
+
+	for (const [name, stored] of [
+		["pi.dev overlay", overlayCatalog()],
+		["etag-only", { ...cachedCatalog(), etag: '"pidev"' }],
+		["nonzero lastModified", { ...cachedCatalog(), lastModified: 1 }],
+		["unmarked lastModified 0", { ...cachedCatalog(), lastModified: 0 }],
+		["foreign source", { ...cachedCatalog(), source: "pi.dev" }],
+	] as const) {
+		for (const api of ["stored", "store"] as const) {
+			test(`ignores a ${name} entry from the ${api} API`, async () => {
+				const context = refreshContext(
+					api === "stored"
+						? { allowNetwork: false, stored }
+						: { allowNetwork: false, store: { read: async () => stored } },
+				);
+				expect(await refreshMetaModels(context, unavailableFetch)).toEqual(
+					fallbackModels(),
+				);
+			});
+		}
+	}
+
+	test("never restores a cached baseUrl other than the direct Meta endpoint", async () => {
+		for (const baseUrl of [
+			"https://evil.example/v1",
+			"http://api.meta.ai/v1",
+		]) {
+			const [model] = cachedCatalog().models;
+			if (!model) throw new Error("Expected cached model");
+			const models = await refreshMetaModels(
+				refreshContext({
+					allowNetwork: false,
+					stored: { ...ownedCatalog(), models: [{ ...model, baseUrl }] },
+				}),
+				unavailableFetch,
+			);
+			expect(models.map((restored) => restored.baseUrl)).toEqual([
+				META_API_BASE_URL,
+			]);
+		}
+	});
+
 	test("cache read failures and malformed snapshots retain bundled fallbacks", async () => {
 		for (const fields of [
 			{ stored: { models: null } },
@@ -267,21 +374,109 @@ describe("Meta catalog persistence compatibility", () => {
 			}),
 		],
 	] as const) {
-		test(`retains the cache after ${name} catalogs without persisting`, async () => {
+		test(`republishes the owned cache after ${name} catalogs`, async () => {
+			for (const stored of [
+				ownedCatalog(),
+				{ ...cachedCatalog(), checkedAt: 1234 },
+			]) {
+				const published: unknown[] = [];
+				const context = refreshContext({
+					stored,
+					publish: async (publication: {
+						persist?: ModelsStoreEntry | null;
+					}) => {
+						published.push(publication.persist);
+						return true;
+					},
+				});
+				expect((await refreshMetaModels(context, fetchImpl))[0]?.id).toBe(
+					"muse-cached",
+				);
+				// Pi's pi.dev overlay may have replaced the shared entry earlier in this refresh.
+				expect(published).toEqual([
+					{
+						...stored,
+						checkedAt: 1234,
+						lastModified: 0,
+						source: STORE_SOURCE,
+					},
+				]);
+			}
+		});
+
+		test(`does not republish a pi.dev overlay entry after ${name} catalogs`, async () => {
 			let publishes = 0;
 			const context = refreshContext({
-				stored: cachedCatalog(),
+				stored: overlayCatalog(),
 				publish: async () => {
 					publishes++;
 					return true;
 				},
 			});
-			expect((await refreshMetaModels(context, fetchImpl))[0]?.id).toBe(
-				"muse-cached",
+			expect(await refreshMetaModels(context, fetchImpl)).toEqual(
+				fallbackModels(),
 			);
 			expect(publishes).toBe(0);
 		});
+
+		test(`never writes the Pi 0.83 legacy store after ${name} catalogs`, async () => {
+			let writes = 0;
+			const context = refreshContext({
+				store: {
+					read: async () => ownedCatalog(),
+					write: async () => {
+						writes++;
+					},
+				},
+			});
+			expect((await refreshMetaModels(context, fetchImpl))[0]?.id).toBe(
+				"muse-cached",
+			);
+			expect(writes).toBe(0);
+		});
 	}
+
+	test("keeps the restored cache when republishing it fails", async () => {
+		const context = refreshContext({
+			stored: ownedCatalog(),
+			publish: async () => {
+				throw new Error("Persistence unavailable");
+			},
+		});
+		expect(
+			(
+				await refreshMetaModels(
+					context,
+					fetchMock(async () => jsonResponse({ data: [] })),
+				)
+			)[0]?.id,
+		).toBe("muse-cached");
+	});
+
+	test("does not republish when an empty catalog completes after cancellation", async () => {
+		const controller = new AbortController();
+		let publishes = 0;
+		const context = refreshContext({
+			signal: controller.signal,
+			stored: ownedCatalog(),
+			publish: async () => {
+				publishes++;
+				return true;
+			},
+		});
+		expect(
+			(
+				await refreshMetaModels(
+					context,
+					fetchMock(async () => {
+						controller.abort();
+						return jsonResponse({ data: [] });
+					}),
+				)
+			)[0]?.id,
+		).toBe("muse-cached");
+		expect(publishes).toBe(0);
+	});
 
 	test("restoring a snapshot re-gates Contributor max after the opt-in changes", async () => {
 		const cached = await withMuseUserAgent("1", () =>

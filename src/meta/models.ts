@@ -328,7 +328,8 @@ export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 				...fallback,
 				name: nonemptyString(entry.name) ?? fallback.name,
 				api: "openai-responses",
-				baseUrl: nonemptyString(entry.baseUrl) ?? META_API_BASE_URL,
+				// The extension only persists the direct endpoint; a cached URL must never redirect the key.
+				baseUrl: META_API_BASE_URL,
 				reasoning:
 					typeof entry.reasoning === "boolean"
 						? entry.reasoning

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 interface PackageManifest {
+	name: string;
 	files: string[];
 	pi?: { extensions?: string[] };
 	dependencies?: Record<string, string>;
@@ -89,5 +90,24 @@ describe("OAuth-only package", () => {
 		expect(Object.keys(manifest.dependencies ?? {}).sort()).toEqual(
 			[...runtimeDependencies].sort(),
 		);
+	});
+
+	test("README install commands track the published package and main", () => {
+		const readme = readFileSync(join(projectRoot, "README.md"), "utf8");
+		const gitSources = [
+			...readme.matchAll(
+				/^\s*pi install (git:github\.com\/BlockedPath\/pi-meta-oauth\S*)/gm,
+			),
+		].map((match) => match[1]);
+		expect(gitSources.length).toBeGreaterThan(0);
+		for (const source of gitSources) {
+			expect(source, `Pinned git install source: ${source}`).not.toMatch(
+				/[@#]/,
+			);
+		}
+		const npmSources = [...readme.matchAll(/^\s*pi install npm:(\S+)/gm)].map(
+			(match) => match[1],
+		);
+		expect(npmSources).toEqual([readManifest().name]);
 	});
 });

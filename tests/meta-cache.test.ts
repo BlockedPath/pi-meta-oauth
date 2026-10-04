@@ -300,7 +300,7 @@ describe("Meta Responses cache and reasoning contracts", () => {
 	test("registers a Meta-only before_provider_request hook that applies the hints", async () => {
 		type RequestHandler = (
 			event: { payload: unknown },
-			ctx: { model?: { provider: string } },
+			ctx: { model?: { provider: string; id: string } },
 		) => unknown;
 		let handler: RequestHandler | undefined;
 		metaOAuthProvider({
@@ -315,18 +315,30 @@ describe("Meta Responses cache and reasoning contracts", () => {
 
 		const other = handler?.(
 			{ payload: { model: "gpt" } },
-			{ model: { provider: "openai" } },
+			{ model: { provider: "openai", id: "gpt" } },
 		);
 		expect(other).toBeUndefined();
 
 		const meta = handler?.(
-			{ payload: { model: "muse-spark-1.2" } },
-			{ model: { provider: META_PROVIDER_ID } },
+			{ payload: { model: "muse-spark-1.2", reasoning: { effort: "none" } } },
+			{ model: { provider: META_PROVIDER_ID, id: "muse-spark-1.2" } },
 		);
-		expect(meta).toMatchObject({
+		expect(meta).toEqual({
 			model: "muse-spark-1.2",
 			prompt_cache_retention: "24h",
 		});
+
+		// ctx.model is the session's current model: after a mid-request switch to
+		// Meta, another model's in-flight payload must pass through untouched.
+		const payload = { model: "gpt-5", reasoning: { effort: "none" } };
+		const switched = handler?.(
+			{ payload },
+			{
+				model: { provider: META_PROVIDER_ID, id: "muse-spark-1.3-contributor" },
+			},
+		);
+		expect(switched).toBeUndefined();
+		expect(payload).toEqual({ model: "gpt-5", reasoning: { effort: "none" } });
 	});
 });
 

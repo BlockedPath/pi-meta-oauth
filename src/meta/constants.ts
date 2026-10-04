@@ -12,6 +12,8 @@ export const DEVICE_TOKEN_URL = `${META_AUTH_BASE_URL}/oidc/device/token/`;
 export const API_KEY_MINT_URL = "https://api.meta.ai/muse-code/key";
 export const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 export const API_KEY_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** Bound each OAuth or mint request, matching Pi's built-in Meta flow. */
+export const META_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Captured Muse CLI fingerprint. Preserve its bytes, including the platform

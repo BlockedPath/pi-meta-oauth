@@ -1,6 +1,18 @@
 import { expect, test } from "bun:test";
-import { errorDetail, postForm, responseBody } from "../src/meta/http.ts";
+import {
+	errorDetail,
+	postForm,
+	RequestTimeoutError,
+	responseBody,
+} from "../src/meta/http.ts";
 import type { Fetch } from "../src/meta/types.ts";
+
+/** A transport that never answers and rejects only when its signal aborts. */
+const stalledFetch: Fetch = (_url, init) =>
+	new Promise((_resolve, reject) => {
+		const signal = init?.signal;
+		signal?.addEventListener("abort", () => reject(signal.reason));
+	});
 
 test.each(["", "not JSON", "null", "[]", "42", '"string"'])(
 	"handles non-object JSON response %j",
@@ -47,4 +59,33 @@ test("device form transport URL-encodes fields and disables redirects", async ()
 		fetchImpl,
 	);
 	expect(body).toEqual({ access_token: "identity" });
+});
+
+test("device form transport times out a stalled request", async () => {
+	for (const signal of [undefined, new AbortController().signal]) {
+		const error = await postForm(
+			"https://auth.meta.com/test",
+			{},
+			stalledFetch,
+			signal,
+			20,
+		).catch((reason: unknown) => reason);
+		expect(error).toBeInstanceOf(RequestTimeoutError);
+		expect((error as Error).cause).toMatchObject({ name: "TimeoutError" });
+	}
+});
+
+test("device form transport leaves caller cancellation to the caller", async () => {
+	const controller = new AbortController();
+	const pending = postForm(
+		"https://auth.meta.com/test",
+		{},
+		stalledFetch,
+		controller.signal,
+		1_000,
+	);
+	controller.abort();
+	const error = await pending.catch((reason: unknown) => reason);
+	expect(error).not.toBeInstanceOf(RequestTimeoutError);
+	expect(error).toBe(controller.signal.reason);
 });

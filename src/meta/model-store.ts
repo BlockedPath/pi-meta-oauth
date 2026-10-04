@@ -17,6 +17,14 @@ import {
 } from "./models.ts";
 import type { Fetch, MetaProviderModel } from "./types.ts";
 
+/**
+ * Pi >=0.86.1 refreshes its built-in pi.dev `meta` overlay before this extension, through the same
+ * models-store key, so persisted entries carry a provenance marker.
+ */
+const STORE_SOURCE = "pi-meta-oauth";
+
+type OwnedStoreEntry = ModelsStoreEntry & { source: typeof STORE_SOURCE };
+
 interface LegacyCatalogStore {
 	read(): Promise<unknown>;
 	write(entry: ModelsStoreEntry): Promise<void>;
@@ -34,17 +42,58 @@ interface CompatibleRefreshContext {
 	}): Promise<boolean>;
 }
 
+/** Accept marked entries and unmarked ones from older releases; pi.dev overlays set lastModified whenever they persist a catalog. */
+function isOwnedEntry(value: unknown): boolean {
+	const entry = asRecord(value);
+	if (!entry) return false;
+	if (entry.source === STORE_SOURCE) return true;
+	return (
+		entry.source === undefined &&
+		entry.lastModified === undefined &&
+		entry.etag === undefined
+	);
+}
+
 async function cachedOrFallbackModels(
 	context: CompatibleRefreshContext,
 ): Promise<MetaProviderModel[]> {
 	try {
 		const stored = context.stored ?? (await context.store?.read());
-		const models = restoreProviderModels(asRecord(stored)?.models);
-		if (models.length > 0) return models;
+		if (isOwnedEntry(stored)) {
+			const models = restoreProviderModels(asRecord(stored)?.models);
+			if (models.length > 0) return models;
+		}
 	} catch {
 		// Persistence is best-effort; an unreadable cache must not disable the provider.
 	}
 	return fallbackModels();
+}
+
+/** Undo a pi.dev overlay write from this refresh so the last good Meta catalog stays persisted. */
+async function republishOwnedEntry(
+	context: CompatibleRefreshContext,
+): Promise<void> {
+	const stored = context.stored;
+	if (context.signal?.aborted || !context.publish || !stored) return;
+	if (!isOwnedEntry(stored)) return;
+	// Keep the original checkedAt: this refresh did not validate the catalog.
+	const entry: OwnedStoreEntry = {
+		...stored,
+		lastModified: 0,
+		source: STORE_SOURCE,
+	};
+	try {
+		await context.publish({ persist: entry });
+	} catch {
+		// The restored catalog remains usable when its persistence fails.
+	}
+}
+
+async function restoreAfterFailedRefresh(
+	context: CompatibleRefreshContext,
+): Promise<MetaProviderModel[]> {
+	await republishOwnedEntry(context);
+	return cachedOrFallbackModels(context);
 }
 
 function modelsForStore(
@@ -65,9 +114,12 @@ async function persistModels(
 	context: CompatibleRefreshContext,
 	models: MetaProviderModel[],
 ): Promise<void> {
-	const entry: ModelsStoreEntry = {
+	const entry: OwnedStoreEntry = {
 		models: modelsForStore(models),
 		checkedAt: Date.now(),
+		// Pi's overlay reads lastModified 0 as "no pi.dev catalog" and skips pi.dev while this entry is fresh.
+		lastModified: 0,
+		source: STORE_SOURCE,
 	};
 	if (context.publish) {
 		// A false result means this generation was superseded; never bypass that check with a legacy write.
@@ -113,7 +165,8 @@ export async function refreshMetaModels(
 			);
 		}
 		const models = toProviderModels(body);
-		if (models.length === 0) return cachedOrFallbackModels(compatibleContext);
+		if (models.length === 0)
+			return restoreAfterFailedRefresh(compatibleContext);
 		if (!context.signal?.aborted) {
 			try {
 				await persistModels(compatibleContext, models);
@@ -125,6 +178,6 @@ export async function refreshMetaModels(
 	} catch (error) {
 		// An in-flight cancellation belongs to the host; do not disguise it as a successful refresh.
 		if (context.signal?.aborted) throw error;
-		return cachedOrFallbackModels(compatibleContext);
+		return restoreAfterFailedRefresh(compatibleContext);
 	}
 }

@@ -10,8 +10,17 @@ import {
 	DEVICE_TOKEN_URL,
 	META_API_VERSION,
 	META_CLIENT_ID,
+	META_REQUEST_TIMEOUT_MS,
 } from "./constants.ts";
-import { delay, errorDetail, postForm, responseBody } from "./http.ts";
+import {
+	asRecord,
+	delay,
+	errorDetail,
+	postForm,
+	RequestTimeoutError,
+	responseBody,
+	withRequestTimeout,
+} from "./http.ts";
 import type { Fetch, Sleep } from "./types.ts";
 
 type Clock = () => number;
@@ -41,9 +50,36 @@ function positiveSeconds(value: unknown, fallback: number): number {
 		: fallback;
 }
 
+/**
+ * Pi writes server-supplied URLs to the terminal, the device URI as a clickable
+ * link. Mirror its built-in Meta flow: http(s) only, re-serialized through
+ * URL so control characters arrive percent-encoded.
+ */
+function trustedHttpUrl(value: unknown): string | undefined {
+	if (!isNonBlankString(value)) return undefined;
+	try {
+		const url = new URL(value);
+		return url.protocol === "https:" || url.protocol === "http:"
+			? url.href
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function failure(message: string, body: Record<string, unknown>): Error {
 	const detail = errorDetail(body);
 	return new Error(`${message}${detail ? `: ${detail}` : ""}`);
+}
+
+/** Say which request timed out; every other failure passes through. */
+function timeoutAs(message: string): (error: unknown) => never {
+	return (error) => {
+		if (error instanceof RequestTimeoutError) {
+			throw new Error(message, { cause: error });
+		}
+		throw error;
+	};
 }
 
 function checkLoginCancellation(signal?: AbortSignal): void {
@@ -102,7 +138,7 @@ async function requestDeviceAuthorization(
 		{ client_id: META_CLIENT_ID },
 		fetchImpl,
 		signal,
-	);
+	).catch(timeoutAs("Meta login request timed out"));
 	checkLoginCancellation(signal);
 	if (!response.ok) {
 		throw failure(
@@ -110,10 +146,13 @@ async function requestDeviceAuthorization(
 			body,
 		);
 	}
+	const verificationUri =
+		trustedHttpUrl(body.verification_uri_complete) ??
+		trustedHttpUrl(body.verification_uri);
 	if (
 		!isNonBlankString(body.device_code) ||
 		!isNonBlankString(body.user_code) ||
-		!isNonBlankString(body.verification_uri)
+		verificationUri === undefined
 	) {
 		throw new Error(
 			"Meta device authorization returned an incomplete response",
@@ -123,9 +162,7 @@ async function requestDeviceAuthorization(
 	return {
 		deviceCode: body.device_code,
 		userCode: body.user_code,
-		verificationUri: isNonBlankString(body.verification_uri_complete)
-			? body.verification_uri_complete
-			: body.verification_uri,
+		verificationUri,
 		intervalSeconds: positiveSeconds(
 			body.interval,
 			DEFAULT_POLL_INTERVAL_SECONDS,
@@ -157,8 +194,11 @@ async function pollIdentityToken(
 		);
 		checkLoginCancellation(signal);
 		// A device code can expire while waiting, especially after slow_down.
-		if (now() >= deadline) break;
+		const pollMilliseconds = deadline - now();
+		if (pollMilliseconds <= 0) break;
 
+		// Cap a stalled poll at the deadline, where its timeout means expiry.
+		const expiresFirst = pollMilliseconds <= META_REQUEST_TIMEOUT_MS;
 		const { response, body } = await postForm(
 			DEVICE_TOKEN_URL,
 			{
@@ -168,6 +208,13 @@ async function pollIdentityToken(
 			},
 			fetchImpl,
 			signal,
+			expiresFirst ? Math.max(1, pollMilliseconds) : META_REQUEST_TIMEOUT_MS,
+		).catch(
+			timeoutAs(
+				expiresFirst
+					? "Meta login request expired"
+					: "Meta login request timed out",
+			),
 		);
 		checkLoginCancellation(signal);
 		if (response.ok && isNonBlankString(body.access_token)) {
@@ -194,20 +241,27 @@ export async function mintMetaApiKey(
 	identityToken: string,
 	fetchImpl: Fetch = globalThis.fetch,
 	signal?: AbortSignal,
+	timeoutMs = META_REQUEST_TIMEOUT_MS,
 ): Promise<string> {
 	signal?.throwIfAborted();
-	const response = await fetchImpl(API_KEY_MINT_URL, {
-		method: "POST",
-		headers: {
-			Accept: "application/json",
-			Authorization: `Bearer ${identityToken}`,
-			"Content-Type": "application/json",
-			"x-api-version": META_API_VERSION,
-		},
-		body: "{}",
+	const { response, body } = await withRequestTimeout(
 		signal,
-	});
-	const body = await responseBody(response);
+		timeoutMs,
+		async (requestSignal) => {
+			const response = await fetchImpl(API_KEY_MINT_URL, {
+				method: "POST",
+				headers: {
+					Accept: "application/json",
+					Authorization: `Bearer ${identityToken}`,
+					"Content-Type": "application/json",
+					"x-api-version": META_API_VERSION,
+				},
+				body: "{}",
+				signal: requestSignal,
+			});
+			return { response, body: await responseBody(response) };
+		},
+	).catch(timeoutAs("Meta API-key mint timed out"));
 	signal?.throwIfAborted();
 	if (!response.ok) {
 		const message =
@@ -217,9 +271,8 @@ export async function mintMetaApiKey(
 		throw failure(message, body);
 	}
 	if (!isNonBlankString(body.api_key)) {
-		const setup = isNonBlankString(body.action_url)
-			? ` Complete setup at ${body.action_url}.`
-			: "";
+		const actionUrl = trustedHttpUrl(body.action_url);
+		const setup = actionUrl ? ` Complete setup at ${actionUrl}.` : "";
 		throw new Error(`Meta did not issue an API key.${setup}`);
 	}
 	return body.api_key;
@@ -273,6 +326,16 @@ export async function loginMeta(
 	}
 }
 
+/** Pi 0.84+ also aborts refresh on its own timeout, which is not a cancel. */
+function refreshAborted(signal: AbortSignal, options?: ErrorOptions): Error {
+	return new Error(
+		asRecord(signal.reason)?.name === "TimeoutError"
+			? "Meta token refresh timed out"
+			: "Meta token refresh was cancelled",
+		options,
+	);
+}
+
 export async function refreshMetaToken(
 	credentials: OAuthCredentials,
 	fetchOrSignal: Fetch | AbortSignal = globalThis.fetch,
@@ -288,21 +351,15 @@ export async function refreshMetaToken(
 		typeof fetchOrSignal === "function" ? fetchOrSignal : globalThis.fetch;
 	const signal =
 		typeof fetchOrSignal === "function" ? undefined : fetchOrSignal;
-	if (signal?.aborted) {
-		throw new Error("Meta token refresh was cancelled");
-	}
+	if (signal?.aborted) throw refreshAborted(signal);
 	let apiKey: string;
 	try {
 		apiKey = await mintMetaApiKey(credentials.refresh, fetchImpl, signal);
 	} catch (error) {
-		if (signal?.aborted) {
-			throw new Error("Meta token refresh was cancelled", { cause: error });
-		}
+		if (signal?.aborted) throw refreshAborted(signal, { cause: error });
 		throw error;
 	}
-	if (signal?.aborted) {
-		throw new Error("Meta token refresh was cancelled");
-	}
+	if (signal?.aborted) throw refreshAborted(signal);
 	return {
 		...credentials,
 		access: apiKey,

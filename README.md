@@ -18,8 +18,10 @@ Meta Model API OAuth for [pi](https://pi.dev).
 ## Install
 
 ```bash
-# OAuth-only branch
-pi install git:github.com/BlockedPath/pi-meta-oauth@meta-oauth-only
+pi install npm:pi-meta-oauth
+
+# Or track main
+pi install git:github.com/BlockedPath/pi-meta-oauth
 
 # Or from a local checkout
 pi install /absolute/path/to/pi-meta-oauth
@@ -93,6 +95,17 @@ count. Pi writes the cache during interactive or RPC startup, and again after
 `/login meta`. `pi --list-models meta` lists currently available models but does
 not itself trigger a network catalog refresh. The cached catalog is also used
 when Pi starts without network access.
+
+On Pi 0.86.1 and later, Pi's built-in pi.dev catalog overlay for `meta` shares
+this store entry and refreshes before the extension. The extension persists its
+catalog with `lastModified: 0` and `source: "pi-meta-oauth"`, so the overlay
+skips pi.dev for 4 hours after a successful Meta refresh. On restore, entries
+written by the overlay are ignored in favor of the bundled models, and the base
+URL is always `https://api.meta.ai/v1`. If a Meta refresh fails after the
+overlay wrote its entry, the extension republishes its last good catalog. If
+pi.dev fails while the cached Meta entry is missing, older than 4 hours, or
+written by an earlier release, Pi aborts that refresh before the Meta catalog is
+fetched.
 
 The bundled fallback uses Meta's nominal `1,048,576`-token context window. A
 cached Muse Code 0.1.0/R708.1 catalog observed on 2026-08-06 reported a lower
