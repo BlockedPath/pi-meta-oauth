@@ -36,6 +36,13 @@ interface DeviceAuthorization {
 const DEFAULT_POLL_INTERVAL_SECONDS = 5;
 const DEFAULT_DEVICE_EXPIRY_SECONDS = 900;
 const POLL_SLOW_DOWN_SECONDS = 5;
+/** Never poll faster than this, matching Pi's built-in device-code poller. */
+const MIN_POLL_INTERVAL_SECONDS = 1;
+/**
+ * Pi's interactive login hides a failure only when its message is exactly this
+ * string (as its built-in OAuth flows throw), so a user cancel stays silent.
+ */
+const LOGIN_CANCELLED_MESSAGE = "Login cancelled";
 
 function isNonBlankString(value: unknown): value is string {
 	return typeof value === "string" && value.trim().length > 0;
@@ -83,7 +90,7 @@ function timeoutAs(message: string): (error: unknown) => never {
 }
 
 function checkLoginCancellation(signal?: AbortSignal): void {
-	if (signal?.aborted) throw new Error("Meta login was cancelled");
+	if (signal?.aborted) throw new Error(LOGIN_CANCELLED_MESSAGE);
 }
 
 function waitForPoll(
@@ -108,7 +115,7 @@ function waitForPoll(
 			cleanup();
 			reject(error);
 		};
-		const onAbort = () => fail(new Error("Meta login was cancelled"));
+		const onAbort = () => fail(new Error(LOGIN_CANCELLED_MESSAGE));
 		signal.addEventListener("abort", onAbort, { once: true });
 		if (signal.aborted) {
 			onAbort();
@@ -182,7 +189,10 @@ async function pollIdentityToken(
 	now: Clock,
 	signal?: AbortSignal,
 ): Promise<string> {
-	let intervalSeconds = device.intervalSeconds;
+	let intervalSeconds = Math.max(
+		MIN_POLL_INTERVAL_SECONDS,
+		device.intervalSeconds,
+	);
 	while (true) {
 		checkLoginCancellation(signal);
 		const remainingMilliseconds = deadline - now();
@@ -224,7 +234,11 @@ async function pollIdentityToken(
 			case "authorization_pending":
 				break;
 			case "slow_down":
-				intervalSeconds += POLL_SLOW_DOWN_SECONDS;
+				// RFC 8628 §3.5 adds five seconds; a longer server-supplied interval wins.
+				intervalSeconds = Math.max(
+					intervalSeconds + POLL_SLOW_DOWN_SECONDS,
+					positiveSeconds(body.interval, 0),
+				);
 				break;
 			case "access_denied":
 				throw new Error("Meta login was denied");
@@ -320,7 +334,7 @@ export async function loginMeta(
 		};
 	} catch (error) {
 		if (signal?.aborted) {
-			throw new Error("Meta login was cancelled", { cause: error });
+			throw new Error(LOGIN_CANCELLED_MESSAGE, { cause: error });
 		}
 		throw error;
 	}

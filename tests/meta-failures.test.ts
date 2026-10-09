@@ -123,6 +123,42 @@ describe("Meta device login failures", () => {
 		expect(credentials.access).toBe("model-api-key");
 	});
 
+	for (const [label, serverInterval, expectedWait] of [
+		["a longer server-supplied interval", 10, 10_000],
+		["the five-second back-off over a shorter server interval", 2, 6000],
+		["the five-second back-off over a malformed server interval", "10", 6000],
+	] as const) {
+		test(`uses ${label} after slow_down`, async () => {
+			const sleeps: number[] = [];
+			const { fetchMock } = scriptedFetch(
+				deviceAuthorization(),
+				jsonResponse({ error: "slow_down", interval: serverInterval }, 400),
+				jsonResponse({ access_token: "identity-token" }),
+				jsonResponse({ api_key: "model-api-key" }),
+			);
+			await loginMeta(loginCallbacks(), fetchMock, async (milliseconds) => {
+				sleeps.push(milliseconds);
+			});
+
+			expect(sleeps).toEqual([1000, expectedWait]);
+		});
+	}
+
+	test("polls at most once per second for a sub-second interval", async () => {
+		const sleeps: number[] = [];
+		const { fetchMock } = scriptedFetch(
+			deviceAuthorization({ interval: 0.05 }),
+			jsonResponse({ error: "authorization_pending" }, 400),
+			jsonResponse({ access_token: "identity-token" }),
+			jsonResponse({ api_key: "model-api-key" }),
+		);
+		await loginMeta(loginCallbacks(), fetchMock, async (milliseconds) => {
+			sleeps.push(milliseconds);
+		});
+
+		expect(sleeps).toEqual([1000, 1000]);
+	});
+
 	const terminalGrants: Array<[string, Response, string]> = [
 		[
 			"access_denied",
@@ -635,7 +671,7 @@ describe("Meta request timeouts", () => {
 			noSleep,
 		);
 		setTimeout(() => controller.abort(), 10);
-		expect(await rejectionMessage(login)).toBe("Meta login was cancelled");
+		expect(await rejectionMessage(login)).toBe("Login cancelled");
 	});
 });
 
