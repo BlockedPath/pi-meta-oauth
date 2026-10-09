@@ -320,8 +320,9 @@ describe("Meta device OAuth", () => {
 				...callbacks,
 				signal: AbortSignal.abort(),
 			};
+		// Pi's login dialog suppresses a failure only on this exact message.
 		await expect(loginMeta(cancellableCallbacks, fetchImpl)).rejects.toThrow(
-			"Meta login was cancelled",
+			/^Login cancelled$/,
 		);
 		expect(requests).toHaveLength(0);
 		expect(deviceCodes).toHaveLength(0);
@@ -358,7 +359,7 @@ describe("Meta device OAuth", () => {
 			const clock = fakeClock();
 			await expect(
 				loginMeta(cancellableCallbacks, fetchImpl, clock.sleep, clock.now),
-			).rejects.toThrow("Meta login was cancelled");
+			).rejects.toThrow("Login cancelled");
 			expect(signals).toHaveLength(requestCount);
 			// Each request signal follows Pi's signal as well as its own timeout.
 			expect(
@@ -389,7 +390,7 @@ describe("Meta device OAuth", () => {
 					controller.abort();
 					throw new Error("Sleep finished after cancellation");
 				}),
-			).rejects.toThrow("Meta login was cancelled");
+			).rejects.toThrow("Login cancelled");
 			expect(requests).toHaveLength(1);
 			expect(removeListener).toHaveBeenCalled();
 		} finally {
@@ -415,7 +416,7 @@ describe("Meta device OAuth", () => {
 		const clearSpy = spyOn(globalThis, "clearTimeout");
 		try {
 			await expect(loginMeta(cancellableCallbacks, fetchImpl)).rejects.toThrow(
-				"Meta login was cancelled",
+				"Login cancelled",
 			);
 			expect(requests).toHaveLength(1);
 			expect(timerSpy).toHaveBeenCalledTimes(1);
