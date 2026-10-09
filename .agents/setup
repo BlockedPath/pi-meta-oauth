@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Prepares an Amp orb: installs the Bun version CI pins and the locked dependencies.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# Keep in sync with bun-version in .github/workflows/ci.yml and publish.yml.
+bun_version="1.3.14"
+bun_bin="/usr/local/bin/bun"
+
+step() {
+	printf '==> %s\n' "$1"
+	SECONDS=0
+}
+done_step() {
+	printf '    done in %ss\n' "$SECONDS"
+}
+
+step "Bun ${bun_version}"
+if [[ "$("$bun_bin" --version 2>/dev/null || true)" != "$bun_version" ]]; then
+	target="x64"
+	grep -qw avx2 /proc/cpuinfo || target="x64-baseline"
+	asset="bun-linux-${target}.zip"
+	tmp="$(mktemp -d)"
+	trap 'rm -rf "$tmp"' EXIT
+	base_url="https://github.com/oven-sh/bun/releases/download/bun-v${bun_version}"
+	curl --fail --location --silent --show-error --output "$tmp/$asset" "$base_url/$asset"
+	curl --fail --location --silent --show-error --output "$tmp/SHASUMS256.txt" "$base_url/SHASUMS256.txt"
+	(cd "$tmp" && grep " ${asset}\$" SHASUMS256.txt | sha256sum --check --strict --quiet)
+	unzip -q "$tmp/$asset" -d "$tmp"
+	sudo install -m 0755 "$tmp/bun-linux-${target}/bun" "$bun_bin"
+	sudo ln -sf "$bun_bin" "$(dirname "$bun_bin")/bunx"
+fi
+"$bun_bin" --version
+done_step
+
+step "bun install --frozen-lockfile"
+"$bun_bin" install --frozen-lockfile
+done_step
