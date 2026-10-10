@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-10
+
 ### Fixed
 
 - Fix `Cannot find module '@earendil-works/pi-ai/api/openai-responses'` when Pi loads the installed extension. The provider now imports its Responses streamer from `@earendil-works/pi-ai/compat`, which Pi's extension loader exposes on Pi 0.83 and later.
@@ -103,7 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.0...v0.6.1
