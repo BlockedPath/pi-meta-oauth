@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+	type Context,
 	type CredentialStore,
 	InMemoryModelsStore,
+	type Model,
 	type ModelsStore,
+	type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
+import type { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import metaOAuthProvider from "../extensions/meta.ts";
 import {
 	META_API_BASE_URL,
 	META_MODEL_CATALOG_URL,
 	META_PROVIDER_ID,
+	MUSE_USER_AGENT,
 } from "../src/meta/constants.ts";
 import { createMetaProviderConfig } from "../src/meta/provider.ts";
+import { withMuseUserAgent } from "./muse-env.ts";
 
 const CATALOG_BASE_URL = "https://pidev.invalid";
 const META_ONLY_MODEL = "muse-spark-meta-only";
@@ -21,8 +29,17 @@ const NETWORK_REFRESH = {
 
 /** The ModelRuntime surface these tests drive, typed locally so every CI Pi version typechecks. */
 interface PiModelRuntime {
-	getModels(providerId: string): readonly { id: string; baseUrl: string }[];
+	getModels(providerId: string): readonly Model<"openai-responses">[];
 	registerProvider(providerId: string, config: unknown): void;
+	streamSimple(
+		model: Model<"openai-responses">,
+		context: Context,
+		options: SimpleStreamOptions & {
+			transformHeaders(
+				headers: Record<string, string | null>,
+			): Promise<Record<string, string | null>>;
+		},
+	): ReturnType<typeof streamSimple>;
 	refresh(options: {
 		allowNetwork: boolean;
 		force?: boolean;
@@ -77,6 +94,91 @@ async function loadModelRuntime(): Promise<PiModelRuntimeClass | undefined> {
 
 const ModelRuntime = await loadModelRuntime();
 const runtimeTest = ModelRuntime ? test : test.skip;
+
+runtimeTest(
+	"request policy follows the in-flight model when the session switches providers",
+	async () => {
+		await withMuseUserAgent("1", async () => {
+			const runtime = await metaRuntime(new InMemoryModelsStore());
+			type Hook = (
+				event: { payload?: unknown; headers?: Record<string, string | null> },
+				ctx: { model: Model<"openai-responses"> },
+			) => unknown;
+			const hooks = new Map<string, Hook>();
+			metaOAuthProvider({
+				registerProvider: (id: string, config: unknown) =>
+					runtime.registerProvider(id, config),
+				on: (name: string, handler: Hook) => {
+					hooks.set(name, handler);
+				},
+			} as unknown as ExtensionAPI);
+			const config = createMetaProviderConfig();
+			runtime.registerProvider("other", {
+				api: "openai-responses",
+				baseUrl: "https://other.invalid/v1",
+				apiKey: "test-key",
+				models: config.models,
+			});
+			const contributor = (provider: string) => {
+				const model = runtime
+					.getModels(provider)
+					.find(({ id }) => id === "muse-spark-1.3-contributor");
+				if (!model) throw new Error("Missing Contributor model");
+				return model;
+			};
+			for (const provider of ["other", "meta"]) {
+				const requestModel = contributor(provider);
+				let selectedModel = requestModel;
+				let captured:
+					| { url: string; headers: Headers; body: Record<string, unknown> }
+					| undefined;
+				const events = runtime.streamSimple(
+					requestModel,
+					{
+						messages: [{ role: "user", content: "Hi", timestamp: 0 }],
+					},
+					{
+						apiKey: "test-key",
+						maxRetries: 0,
+						transformHeaders: async (headers) => {
+							await hooks.get("before_provider_headers")?.(
+								{ headers },
+								{ model: selectedModel },
+							);
+							return headers;
+						},
+						onPayload: (payload) =>
+							hooks.get("before_provider_request")?.(
+								{ payload },
+								{ model: selectedModel },
+							),
+						fetch: (async (input, init) => {
+							captured = {
+								url: String(input),
+								headers: new Headers(init?.headers),
+								body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+							};
+							return new Response("Stubbed failure", { status: 400 });
+						}) as typeof fetch,
+					},
+				);
+				// Authentication/request preparation is asynchronous, just as in Pi's SDK.
+				selectedModel = contributor(provider === "meta" ? "other" : "meta");
+				for await (const _event of events) {
+					/* drain the mocked response */
+				}
+				expect(captured?.url).toBe(`${requestModel.baseUrl}/responses`);
+				if (provider === "meta") {
+					expect(captured?.headers.get("user-agent")).toBe(MUSE_USER_AGENT);
+					expect(captured?.body.prompt_cache_retention).toBe("24h");
+				} else {
+					expect(captured?.headers.get("user-agent")).not.toBe(MUSE_USER_AGENT);
+					expect(captured?.body.prompt_cache_retention).toBeUndefined();
+				}
+			}
+		});
+	},
+);
 
 async function metaRuntime(modelsStore: ModelsStore): Promise<PiModelRuntime> {
 	if (!ModelRuntime) throw new Error("Pi ModelRuntime is unavailable");

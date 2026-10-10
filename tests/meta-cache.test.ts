@@ -3,11 +3,14 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Context, Model } from "@earendil-works/pi-ai";
+import type {
+	Context,
+	Model,
+	SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import metaOAuthProvider, {
+import {
 	applyMetaResponsesCacheHints,
 	applyMetaUserAgentFingerprint,
 	createMetaProviderConfig,
@@ -95,11 +98,23 @@ async function captureResponsesRequest(options?: {
 	cacheRetention?: "none" | "short" | "long";
 	sessionId?: string;
 	applyHints?: boolean;
-}): Promise<{ url?: string; payload?: Record<string, unknown> }> {
+	model?: Model<"openai-responses">;
+	headers?: SimpleStreamOptions["headers"];
+	onPayload?: SimpleStreamOptions["onPayload"];
+}): Promise<{
+	url?: string;
+	payload?: Record<string, unknown>;
+	headers?: Headers;
+}> {
 	let url: string | undefined;
 	let payload: Record<string, unknown> | undefined;
-	const events = streamSimple(
-		museModel(),
+	let headers: Headers | undefined;
+	const send = options?.applyHints
+		? createMetaProviderConfig().streamSimple
+		: streamSimple;
+	if (!send) throw new Error("Expected Meta stream adapter");
+	const events = send(
+		options?.model ?? museModel(),
 		toStreamContext({
 			messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
 		}),
@@ -108,26 +123,20 @@ async function captureResponsesRequest(options?: {
 			sessionId: options?.sessionId ?? "sid",
 			reasoning: options?.reasoning,
 			cacheRetention: options?.cacheRetention,
-			fetch: (async (input: RequestInfo | URL) => {
+			headers: options?.headers,
+			fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
 				url = String(input);
+				headers = new Headers(init?.headers);
+				payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
 				return new Response("not a stream", { status: 400 });
 			}) as typeof fetch,
-			onPayload: (next) => {
-				const hinted = options?.applyHints
-					? applyMetaResponsesCacheHints(next)
-					: next;
-				payload =
-					hinted && typeof hinted === "object"
-						? (hinted as Record<string, unknown>)
-						: undefined;
-				return hinted;
-			},
+			onPayload: options?.onPayload,
 		},
 	);
 	for await (const _event of events) {
 		// Drain until the mocked 400 terminates the stream.
 	}
-	return { url, payload };
+	return { url, payload, headers };
 }
 
 describe("Meta Responses cache and reasoning contracts", () => {
@@ -297,48 +306,21 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		);
 	});
 
-	test("registers a Meta-only before_provider_request hook that applies the hints", async () => {
-		type RequestHandler = (
-			event: { payload: unknown },
-			ctx: { model?: { provider: string; id: string } },
-		) => unknown;
-		let handler: RequestHandler | undefined;
-		metaOAuthProvider({
-			registerProvider() {},
-			on(event: string, next: unknown) {
-				if (event === "before_provider_request") {
-					handler = next as RequestHandler;
-				}
-			},
-		} as unknown as ExtensionAPI);
-		expect(handler).toBeDefined();
-
-		const other = handler?.(
-			{ payload: { model: "gpt" } },
-			{ model: { provider: "openai", id: "gpt" } },
-		);
-		expect(other).toBeUndefined();
-
-		const meta = handler?.(
-			{ payload: { model: "muse-spark-1.2", reasoning: { effort: "none" } } },
-			{ model: { provider: META_PROVIDER_ID, id: "muse-spark-1.2" } },
-		);
-		expect(meta).toEqual({
-			model: "muse-spark-1.2",
-			prompt_cache_retention: "24h",
+	test("applies request-local hints after an async payload replacement without discarding caller fields", async () => {
+		const { payload } = await captureResponsesRequest({
+			applyHints: true,
+			onPayload: async (_payload, model) => ({
+				model: model.id,
+				input: "Replacement prompt",
+				prompt_cache_retention: "in-memory",
+				reasoning: { effort: "none" },
+			}),
 		});
-
-		// ctx.model is the session's current model: after a mid-request switch to
-		// Meta, another model's in-flight payload must pass through untouched.
-		const payload = { model: "gpt-5", reasoning: { effort: "none" } };
-		const switched = handler?.(
-			{ payload },
-			{
-				model: { provider: META_PROVIDER_ID, id: "muse-spark-1.3-contributor" },
-			},
-		);
-		expect(switched).toBeUndefined();
-		expect(payload).toEqual({ model: "gpt-5", reasoning: { effort: "none" } });
+		expect(payload).toEqual({
+			model: "muse-spark-1.2-contributor",
+			input: "Replacement prompt",
+			prompt_cache_retention: "in-memory",
+		});
 	});
 });
 
@@ -406,54 +388,59 @@ describe("Meta User-Agent fingerprint", () => {
 		}
 	});
 
-	test("headers hook fingerprints only opted-in, direct Contributor 1.3 requests", async () => {
-		type HeadersHandler = (
-			event: { headers: Record<string, string | null> },
-			ctx: { model?: { provider: string; id?: string; baseUrl?: string } },
-		) => unknown;
-		let handler: HeadersHandler | undefined;
-		metaOAuthProvider({
-			registerProvider() {},
-			on(event: string, next: unknown) {
-				if (event === "before_provider_headers") {
-					handler = next as HeadersHandler;
-				}
-			},
-		} as unknown as ExtensionAPI);
-		expect(handler).toBeDefined();
-
-		const contributor = {
-			provider: META_PROVIDER_ID,
-			id: "muse-spark-1.3-contributor",
-			baseUrl: META_API_BASE_URL,
-		};
+	test("stream adapter fingerprints only opted-in, direct Contributor 1.3 requests", async () => {
+		const contributor = museModel("muse-spark-1.3-contributor");
 		const headersFor = async (
 			optIn: string | undefined,
-			model: { provider: string; id?: string; baseUrl?: string },
+			model: Model<"openai-responses">,
 		) =>
 			withMuseUserAgent(optIn, async () => {
-				const headers: Record<string, string | null> = {};
-				await handler?.({ headers }, { model });
-				return headers;
+				const result = await captureResponsesRequest({
+					applyHints: true,
+					model,
+				});
+				expect(result.url).toBe(`${model.baseUrl}/responses`);
+				return result.headers?.get("user-agent");
 			});
 
 		// Opted in, direct endpoint, Contributor 1.3: fingerprinted.
-		expect((await headersFor("1", contributor))["User-Agent"]).toBe(
-			MUSE_USER_AGENT,
-		);
+		expect(await headersFor("1", contributor)).toBe(MUSE_USER_AGENT);
 		// Default (not opted in): untouched, Pi's own User-Agent is kept.
-		expect(await headersFor(undefined, contributor)).toEqual({});
-		expect(await headersFor("0", contributor)).toEqual({});
+		expect(await headersFor(undefined, contributor)).not.toBe(MUSE_USER_AGENT);
+		expect(await headersFor("0", contributor)).not.toBe(MUSE_USER_AGENT);
 		// Opted in but any other Meta model, provider, or endpoint: untouched.
 		for (const model of [
 			{ ...contributor, id: "muse-spark-1.3" },
 			{ ...contributor, id: "muse-spark-1.2-contributor" },
 			{ ...contributor, provider: "openai" },
 			{ ...contributor, baseUrl: "https://proxy.example/v1" },
-			{ provider: META_PROVIDER_ID, id: contributor.id },
 		]) {
-			expect(await headersFor("1", model)).toEqual({});
+			expect(await headersFor("1", model)).not.toBe(MUSE_USER_AGENT);
 		}
+	});
+
+	test("stream adapter preserves model and request User-Agent overrides", async () => {
+		await withMuseUserAgent("1", async () => {
+			for (const name of ["User-Agent", "user-agent"]) {
+				const model = {
+					...museModel("muse-spark-1.3-contributor"),
+					headers: { [name]: "custom-model" },
+				};
+				const modelOnly = await captureResponsesRequest({
+					applyHints: true,
+					model,
+				});
+				expect(modelOnly.headers?.get("user-agent")).toBe("custom-model");
+				for (const value of ["custom-request", null]) {
+					const result = await captureResponsesRequest({
+						applyHints: true,
+						model,
+						headers: { [name]: value },
+					});
+					expect(result.headers?.get("user-agent")).toBe(value);
+				}
+			}
+		});
 	});
 
 	test("exposes Contributor 1.3 max only when the fingerprint is opted in", async () => {
