@@ -1,4 +1,6 @@
-import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
+// Pi's extension loader maps only pi-ai's root, compat, oauth, and providers
+// entrypoints; installed extensions cannot resolve `pi-ai/api/*` subpaths.
+import { openAIResponsesApi } from "@earendil-works/pi-ai/compat";
 import {
 	META_API_BASE_URL,
 	META_ENV_VAR,
@@ -12,6 +14,8 @@ import {
 	applyMetaResponsesCacheHints,
 } from "./request-policy.ts";
 import type { MetaProviderConfig } from "./types.ts";
+
+const { streamSimple } = openAIResponsesApi();
 
 export function createMetaProviderConfig(): MetaProviderConfig {
 	return {

@@ -1,6 +1,8 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { cp, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,6 +36,84 @@ function publishedFiles(manifest: PackageManifest): Set<string> {
 }
 
 describe("OAuth-only package", () => {
+	test("loads an installed extension through Pi's Node CLI without local peer packages", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "meta-loader-"));
+		try {
+			const installed = join(directory, "node_modules", "pi-meta-oauth");
+			await mkdir(installed, { recursive: true });
+			for (const entry of ["package.json", ...readManifest().files]) {
+				await cp(join(projectRoot, entry), join(installed, entry), {
+					recursive: true,
+				});
+			}
+			const agentRoot = resolve(
+				dirname(
+					fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent")),
+				),
+				"..",
+			);
+			const agentPackage = JSON.parse(
+				readFileSync(join(agentRoot, "package.json"), "utf8"),
+			) as { bin: { pi: string } };
+			const child = Bun.spawn(
+				[
+					"node",
+					join(agentRoot, agentPackage.bin.pi),
+					"--offline",
+					"--no-session",
+					"--no-extensions",
+					"--extension",
+					join(installed, "extensions/meta.ts"),
+					"--mode",
+					"rpc",
+					"--provider",
+					"meta",
+					"--model",
+					"muse-spark-1.3-contributor",
+				],
+				{
+					cwd: directory,
+					env: {
+						...process.env,
+						HOME: directory,
+						USERPROFILE: directory,
+						PI_CODING_AGENT_DIR: join(directory, "agent"),
+						META_API_KEY: "test-key",
+					},
+					stdin: new Blob(['{"id":"state","type":"get_state"}\n']),
+					stdout: "pipe",
+					stderr: "pipe",
+				},
+			);
+			const [stdout, stderr, exitCode] = await Promise.all([
+				new Response(child.stdout).text(),
+				new Response(child.stderr).text(),
+				child.exited,
+			]);
+			expect(exitCode, stderr).toBe(0);
+			expect(stderr).not.toContain("Failed to load extension");
+			const responses = stdout
+				.trim()
+				.split("\n")
+				.map(
+					(line) =>
+						JSON.parse(line) as {
+							id?: string;
+							success?: boolean;
+							data?: { model?: { id?: string } };
+						},
+				);
+			expect(
+				responses.find((response) => response.id === "state"),
+			).toMatchObject({
+				success: true,
+				data: { model: { id: "muse-spark-1.3-contributor" } },
+			});
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+		}
+	}, 30_000);
+
 	test("registers and ships only the Meta OAuth provider extension", () => {
 		const manifest = readManifest();
 

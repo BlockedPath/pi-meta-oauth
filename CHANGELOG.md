@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix `Cannot find module '@earendil-works/pi-ai/api/openai-responses'` when Pi loads the installed extension. The provider now imports its Responses streamer from `@earendil-works/pi-ai/compat`, which Pi's extension loader exposes on Pi 0.83 and later.
+
 ## [0.7.1] - 2026-10-10
 
 ### Changed
