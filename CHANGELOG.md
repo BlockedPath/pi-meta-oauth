@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-10
+
 ### Changed
 
 - Split the extension into focused OAuth, model validation, persistence, provider, and request-policy modules while preserving the registered entrypoint and named exports.
@@ -24,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bound each device-authorization, token-poll, and key-mint request to 30 seconds, and token polls also to the device-code deadline, so a stalled connection fails with a timeout or expiry error instead of hanging login or Pi 0.83 refreshes.
 - Report Pi's refresh timeout as `Meta token refresh timed out` instead of a cancellation.
 - Accept only http(s) verification and setup URLs from Meta, normalized like Pi's built-in Meta login so control characters cannot reach the terminal.
-- Apply the Responses cache hints only when the payload's model is the session's Meta model, so a mid-request model switch cannot rewrite another provider's request.
+- Bind Responses cache hints and the opt-in Muse fingerprint to the in-flight request's model and endpoint, so switching the session model cannot modify another provider's request or skip Meta's adjustments. Preserve explicit header overrides and caller-replaced payloads ([#29](https://github.com/BlockedPath/pi-meta-oauth/pull/29)).
 - Treat an empty or blank `META_API_KEY` or `MODEL_API_KEY` as unset when mirroring the two aliases.
 - Point the README install command at the npm package or `main` instead of the stale v0.6.0 `meta-oauth-only` branch.
 
@@ -97,7 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.5.0...v0.6.0
