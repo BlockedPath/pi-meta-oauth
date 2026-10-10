@@ -148,8 +148,8 @@ PI_META_LIVE_API_KEY='LLM|...' bun run test:live tests/meta-cache.test.ts
 
 ## Development
 
-`extensions/meta.ts` is the only registered Pi extension. It connects the
-provider and hooks; implementation modules live in `src/meta/` and ship with
+`extensions/meta.ts` is the only registered Pi extension. It registers the
+provider; implementation modules live in `src/meta/` and ship with
 the package:
 
 - `oauth.ts`: device authorization, cancellable polling, key minting, and refresh.
@@ -157,7 +157,14 @@ the package:
 - `model-store.ts`: catalog refresh and Pi 0.83/0.84+ persistence compatibility.
 - `muse-policy.ts` and `request-policy.ts`: opt-in effort gating and request hints.
 - `provider.ts`, `environment.ts`, `http.ts`, `constants.ts`, and `types.ts`:
-  provider assembly, key aliases, shared transport, and common definitions.
+  provider assembly and request-local streaming, key aliases, shared transport,
+  and common definitions.
+
+The provider's stream adapter applies cache hints and the opt-in fingerprint
+using the in-flight request's model and endpoint, not the session's current
+selection. Switching models during request preparation cannot apply Meta
+settings to another provider's request. Explicit headers and cache-retention
+values remain authoritative, including payloads replaced by caller callbacks.
 
 Network JSON and persisted catalogs are validated before becoming Pi model
 definitions. Each provider configuration owns its model metadata; mutations
