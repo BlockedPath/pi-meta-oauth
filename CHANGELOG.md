@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-13
+
+- No runtime changes. Repository-only release: the sole commit since 0.7.2 adds the Amp orb Tailscale setup scripts (`.agents/tailscale-install`, `.agents/tailscale-up`, `.agents/resume`) ([#30](https://github.com/BlockedPath/pi-meta-oauth/pull/30)), which are outside the package's `files` list, so the published tarball matches 0.7.2 apart from the version and this changelog.
+
 ## [0.7.2] - 2026-10-10
 
 ### Fixed
@@ -105,7 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.6.1...v0.7.0
