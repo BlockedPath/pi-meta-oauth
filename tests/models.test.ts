@@ -314,6 +314,41 @@ describe("Meta cached model decoding", () => {
 		expect(model.compat).not.toHaveProperty("supportsDeveloperRole");
 	});
 
+	test("restore applies known max policy over stale cached values", async () => {
+		const cached = (id: string, max: string | null) => ({
+			id,
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+			thinkingLevelMap: { max },
+		});
+		await withMuseUserAgent(undefined, () => {
+			const byId = Object.fromEntries(
+				restoreProviderModels([
+					cached("muse-spark-1.3", null),
+					cached("muse-wonder-1.0", null),
+					cached("muse-wonder-full-1.0", null),
+					cached("muse-wonder-1.0-contributor", "max"),
+					cached("muse-wonder-full-1.0-contributor", "max"),
+				]).map((model) => [model.id, model]),
+			);
+			expect(byId["muse-spark-1.3"]?.thinkingLevelMap?.max).toBe("max");
+			expect(byId["muse-wonder-1.0"]?.thinkingLevelMap?.max).toBe("max");
+			expect(byId["muse-wonder-full-1.0"]?.thinkingLevelMap?.max).toBe("max");
+			expect(
+				byId["muse-wonder-1.0-contributor"]?.thinkingLevelMap?.max,
+			).toBeNull();
+			expect(
+				byId["muse-wonder-full-1.0-contributor"]?.thinkingLevelMap?.max,
+			).toBeNull();
+		});
+		await withMuseUserAgent("1", () => {
+			const [model] = restoreProviderModels([
+				cached("muse-wonder-1.0-contributor", null),
+			]);
+			expect(model?.thinkingLevelMap?.max).toBe("max");
+		});
+	});
+
 	test("restored nested values are detached from the cache snapshot", () => {
 		const cached = {
 			...requiredModel(fallbackModels()),

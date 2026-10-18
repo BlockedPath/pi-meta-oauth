@@ -48,7 +48,7 @@ Prefer a static key instead? Set `META_API_KEY` (or `MODEL_API_KEY`) and skip
 
 ## Models
 
-Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh` (`muse-spark-1.3` additionally supports `max`; `muse-spark-1.3-contributor` does too when [opted in](#contributor-max-opt-in)).
+Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh` (`muse-spark-1.3` additionally supports `max`; `muse-spark-1.3-contributor` does too when [opted in](#contributor-max-opt-in)). The catalog-discovered `muse-wonder-1.0` and `muse-wonder-full-1.0` also support `max`, as do their `-contributor` variants when opted in.
 
 | id | pricing (input/output/cached) $/M |
 | --- | --- |
@@ -75,7 +75,7 @@ Then open a **new** terminal and restart Pi. Shells that were already open don't
 
 The header is the same on every OS. The captured string names `linux-x86_64`, but the platform segment doesn't appear to be checked: it was accepted from Windows (2026-09-26), and oh-my-pi sends the same fixed string on every platform.
 
-With the flag set, the extension exposes `max` on `muse-spark-1.3-contributor` and sends the captured Muse `User-Agent` on that model's requests to `https://api.meta.ai/v1` only. Other models, proxies and custom `baseUrl`s, and any `User-Agent` you set yourself are left untouched. Without the flag, Contributor `max` is hidden and Pi's own `User-Agent` is sent.
+With the flag set, the extension exposes `max` on the gated contributor models (`muse-spark-1.3-contributor`, `muse-wonder-1.0-contributor`, and `muse-wonder-full-1.0-contributor`) and sends the captured Muse `User-Agent` on those models' requests to `https://api.meta.ai/v1` only. Other models, proxies and custom `baseUrl`s, and any `User-Agent` you set yourself are left untouched. Without the flag, Contributor `max` is hidden and Pi's own `User-Agent` is sent.
 
 > **Warning:** this makes Pi identify as Meta's first-party Muse client. It relies on undocumented server behavior, is not supported by Meta, may stop working without notice, and may conflict with Meta's terms. Enable it only if you accept that risk for your account.
 
