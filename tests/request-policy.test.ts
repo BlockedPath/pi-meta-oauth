@@ -53,10 +53,42 @@ describe("Muse effort policy", () => {
 		expect(gateMuseMaxEffort(original, {})).toBe(original);
 	});
 
+	test("exposes unconditional max and gates Wonder Contributor max", () => {
+		for (const id of [
+			"muse-spark-1.3",
+			"muse-wonder-1.0",
+			"muse-wonder-full-1.0",
+		]) {
+			const model = providerModel(id, null);
+			for (const env of [{}, enabled]) {
+				const gated = gateMuseMaxEffort(model, env);
+				expect(gated).not.toBe(model);
+				expect(gated.thinkingLevelMap?.max).toBe("max");
+				expect(gateMuseMaxEffort(gated, env)).toBe(gated);
+			}
+			expect(model.thinkingLevelMap?.max).toBeNull();
+		}
+		for (const id of [
+			"muse-wonder-1.0-contributor",
+			"muse-wonder-full-1.0-contributor",
+		]) {
+			const model = providerModel(id, null);
+			expect(gateMuseMaxEffort(model, {})).toBe(model);
+			expect(gateMuseMaxEffort(model, enabled).thinkingLevelMap?.max).toBe(
+				"max",
+			);
+			expect(
+				gateMuseMaxEffort(providerModel(id, "max"), {}).thinkingLevelMap?.max,
+			).toBeNull();
+		}
+	});
+
 	test("preserves standard models and explicit alternative effort mappings", () => {
 		for (const model of [
 			providerModel("muse-spark-1.3", "max"),
 			providerModel("muse-spark-future", "ultra"),
+			providerModel("muse-wonder-1.0", "ultra"),
+			providerModel("muse-wonder-1.0-contributor", "ultra"),
 			providerModel(contributor.id, "ultra"),
 			{ ...providerModel(contributor.id, null), thinkingLevelMap: undefined },
 		]) {
@@ -95,6 +127,24 @@ describe("Meta provider header policy", () => {
 		});
 	});
 
+	test("fingerprints Wonder Contributor requests when opted in", () => {
+		for (const id of [
+			"muse-wonder-1.0-contributor",
+			"muse-wonder-full-1.0-contributor",
+		]) {
+			const headers: Record<string, string | null> = {};
+			expect(
+				applyMetaModelHeaders(headers, { ...contributor, id }, enabled),
+			).toBe(true);
+			expect(headers).toEqual({ "User-Agent": MUSE_USER_AGENT });
+			const optedOut: Record<string, string | null> = {};
+			expect(applyMetaModelHeaders(optedOut, { ...contributor, id }, {})).toBe(
+				false,
+			);
+			expect(optedOut).toEqual({});
+		}
+	});
+
 	test("requires the provider, model, endpoint, and explicit opt-in together", () => {
 		for (const model of [
 			undefined,
@@ -104,6 +154,8 @@ describe("Meta provider header policy", () => {
 			{},
 			{ ...contributor, provider: "openai" },
 			{ ...contributor, id: "muse-spark-1.3" },
+			{ ...contributor, id: "muse-wonder-1.0" },
+			{ ...contributor, id: "muse-wonder-full-1.0" },
 			{ ...contributor, id: "muse-spark-1.2-contributor" },
 			{ ...contributor, id: null },
 			{ ...contributor, baseUrl: undefined },

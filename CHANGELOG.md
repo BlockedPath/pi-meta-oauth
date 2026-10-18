@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Reasoning effort `max` on the Muse Wonder models: `muse-wonder-1.0` and `muse-wonder-full-1.0` expose it unconditionally, while `muse-wonder-1.0-contributor` and `muse-wonder-full-1.0-contributor` are gated behind the existing `META_MUSE_USER_AGENT=1` opt-in (including the Muse fingerprint on their direct requests), matching `muse-spark-1.3-contributor`. The policy applies to catalog and cached models alike, so a stale cached `max: null` no longer masks known support.
+
 ## [0.7.3] - 2026-10-13
 
 - No runtime changes. Repository-only release: the sole commit since 0.7.2 adds the Amp orb Tailscale setup scripts (`.agents/tailscale-install`, `.agents/tailscale-up`, `.agents/resume`) ([#30](https://github.com/BlockedPath/pi-meta-oauth/pull/30)), which are outside the package's `files` list, so the published tarball matches 0.7.2 apart from the version and this changelog.
