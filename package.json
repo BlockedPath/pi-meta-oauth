@@ -1,6 +1,6 @@
 {
   "name": "pi-meta-oauth",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Meta Model API OAuth provider for pi",
   "keywords": [
     "pi-package",
