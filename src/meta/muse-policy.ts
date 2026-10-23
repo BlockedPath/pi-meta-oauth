@@ -9,11 +9,10 @@ export const MUSE_USER_AGENT_MODEL_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Models known to accept literal max effort with any User-Agent. The Wonder
- * models have no bundled definition in models.ts, so max originates here;
- * muse-spark-1.3 has one, but is listed so the gate — which runs on every
- * model list — is the single authority and a stale cached `max: null`
- * cannot mask its fallback-declared support.
+ * Models known to accept literal max effort with any User-Agent. Each also
+ * has a bundled definition in models.ts that declares max, but they are
+ * listed here so the gate — which runs on every model list — is the single
+ * authority and a stale cached `max: null` cannot mask that support.
  */
 export const MAX_EFFORT_MODEL_IDS: ReadonlySet<string> = new Set([
 	"muse-spark-1.3",

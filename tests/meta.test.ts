@@ -6,6 +6,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import {
 	createMetaProviderConfig,
+	isNonChatModelId,
 	loginMeta,
 	META_API_BASE_URL,
 	META_MODEL_CATALOG_URL,
@@ -15,6 +16,7 @@ import {
 	refreshMetaToken,
 	toProviderModels,
 } from "../extensions/meta.ts";
+import { resolveLiveMetaApiKey } from "./live-key.ts";
 import { withMuseUserAgent } from "./muse-env.ts";
 
 const LIVE_CATALOG_SNAPSHOT_2026_08_10 = [
@@ -24,7 +26,28 @@ const LIVE_CATALOG_SNAPSHOT_2026_08_10 = [
 	"muse-spark-1.2-contributor",
 	"muse-spark-1.1",
 ];
-const liveApiKey = process.env.PI_META_LIVE_API_KEY;
+/** GET /v1/models on 2026-10-23: bare entries, in the server's order, with no muse-code metadata. */
+const LIVE_CATALOG_SNAPSHOT_2026_10_23 = [
+	"muse-wonder-full-1.0-contributor",
+	"muse-wonder-full-1.0",
+	"muse-wonder-1.0-contributor",
+	"muse-wonder-1.0",
+	"sam-3.1",
+	"muse-spark-1.3-contributor",
+	"muse-voice-transcribe-1.0",
+	"muse-spark-1.3",
+	"muse-image-1.0",
+	"muse-spark-1.2-contributor",
+	"muse-spark-1.2",
+	"muse-spark-1.1",
+];
+/** Billed per image, audio hour, or video frame; never chat models. */
+const NON_CHAT_IDS_2026_10_23 = [
+	"sam-3.1",
+	"muse-voice-transcribe-1.0",
+	"muse-image-1.0",
+];
+const liveApiKey = resolveLiveMetaApiKey();
 const liveCatalogTest = liveApiKey ? test : test.skip;
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -75,8 +98,8 @@ describe("Meta OAuth provider", () => {
 	// META_MUSE_USER_AGENT opts in (covered in meta-cache.test.ts). Every
 	// other Muse Spark model 400s with "Supported values: [minimal, low,
 	// medium, high, xhigh]". The bare catalog carries no variants block, so
-	// known IDs inherit max support from fallbacks (Spark) or the known-max
-	// policy in muse-policy.ts (Wonder, which has no bundled fallback) while
+	// known IDs inherit max support from their bundled fallbacks, which the
+	// known-max policy in muse-policy.ts re-applies on every list, while
 	// custom server-advertised effort names still win. Literal Contributor
 	// max always requires opt-in.
 	test("exposes max effort only where the model supports it", async () => {
@@ -158,11 +181,20 @@ describe("Meta OAuth provider", () => {
 	// defaults via finitePositive()/numericCost() (empty/whitespace cost strings
 	// treated as missing).
 	test("maps known bare catalog entries to complete bundled metadata", () => {
+		const byId = (models: { id: string }[]) =>
+			[...models].sort((a, b) => a.id.localeCompare(b.id));
 		const models = toProviderModels({
-			data: LIVE_CATALOG_SNAPSHOT_2026_08_10.map((id) => ({ id })),
+			data: LIVE_CATALOG_SNAPSHOT_2026_10_23.map((id) => ({ id })),
 		});
 
-		expect(models).toEqual(createMetaProviderConfig().models ?? []);
+		// The non-chat families are dropped; everything else maps 1:1 onto the
+		// bundled table, in the catalog's order rather than the bundled order.
+		expect(byId(models)).toEqual(byId(createMetaProviderConfig().models ?? []));
+		expect(models.map(({ id }) => id)).toEqual(
+			LIVE_CATALOG_SNAPSHOT_2026_10_23.filter(
+				(id) => !NON_CHAT_IDS_2026_10_23.includes(id),
+			),
+		);
 	});
 
 	test("maps unknown IDs with incomplete metadata to fallback defaults", () => {
@@ -245,13 +277,23 @@ describe("Meta OAuth provider", () => {
 		});
 	});
 
-	test("bundled fallbacks cover the 2026-08-10 live catalog snapshot", () => {
+	test("bundled fallbacks and the non-chat filter cover every live catalog snapshot", () => {
 		const fallbackIDs = new Set(
 			(createMetaProviderConfig().models ?? []).map((model) => model.id),
 		);
 
-		for (const id of LIVE_CATALOG_SNAPSHOT_2026_08_10) {
-			expect(fallbackIDs.has(id)).toBe(true);
+		for (const id of [
+			...LIVE_CATALOG_SNAPSHOT_2026_08_10,
+			...LIVE_CATALOG_SNAPSHOT_2026_10_23,
+		]) {
+			expect(
+				fallbackIDs.has(id) || isNonChatModelId(id),
+				`${id} needs a bundled definition or a non-chat prefix`,
+			).toBe(true);
+		}
+		for (const id of NON_CHAT_IDS_2026_10_23) {
+			expect(isNonChatModelId(id), id).toBe(true);
+			expect(fallbackIDs.has(id), id).toBe(false);
 		}
 	});
 
@@ -503,31 +545,42 @@ describe("Meta OAuth provider", () => {
 		expect(credentials.refresh).toBe("identity-token");
 	});
 
-	liveCatalogTest("live catalog IDs have bundled fallbacks", async () => {
-		if (!liveApiKey) throw new Error("PI_META_LIVE_API_KEY is required");
-		const response = await fetch(META_MODEL_CATALOG_URL, {
-			headers: {
-				Accept: "application/json",
-				Authorization: `Bearer ${liveApiKey}`,
-				"x-api-version": "1.0.0",
-			},
-		});
-		if (!response.ok) {
-			throw new Error(`Meta model catalog failed (HTTP ${response.status})`);
-		}
-		const body = (await response.json()) as {
-			data?: Array<{ id?: unknown }>;
-		};
-		const liveIDs = (body.data ?? []).flatMap((entry) =>
-			typeof entry.id === "string" && entry.id ? [entry.id] : [],
-		);
-		const fallbackIDs = new Set(
-			(createMetaProviderConfig().models ?? []).map((model) => model.id),
-		);
+	// Canary for catalog drift: a new chat ID needs a bundled definition (the
+	// live catalog carries no metadata to describe it), and a new non-token
+	// family needs a prefix so it stays out of the chat model list.
+	liveCatalogTest(
+		"live catalog IDs are bundled chat models or filtered non-chat families",
+		async () => {
+			if (!liveApiKey) throw new Error("A live Meta API key is required");
+			const response = await fetch(META_MODEL_CATALOG_URL, {
+				headers: {
+					Accept: "application/json",
+					Authorization: `Bearer ${liveApiKey}`,
+					"x-api-version": "1.0.0",
+				},
+			});
+			if (!response.ok) {
+				throw new Error(`Meta model catalog failed (HTTP ${response.status})`);
+			}
+			const body = (await response.json()) as {
+				data?: Array<{ id?: unknown }>;
+			};
+			const liveIDs = (body.data ?? []).flatMap((entry) =>
+				typeof entry.id === "string" && entry.id ? [entry.id] : [],
+			);
+			const fallbackIDs = new Set(
+				(createMetaProviderConfig().models ?? []).map((model) => model.id),
+			);
 
-		expect(liveIDs).not.toHaveLength(0);
-		expect(liveIDs.filter((id) => !fallbackIDs.has(id))).toEqual([]);
-	});
+			expect(liveIDs).not.toHaveLength(0);
+			expect(
+				liveIDs.filter((id) => !fallbackIDs.has(id) && !isNonChatModelId(id)),
+			).toEqual([]);
+			const decoded = toProviderModels(body).map((model) => model.id);
+			expect(decoded).toEqual(liveIDs.filter((id) => !isNonChatModelId(id)));
+			expect(decoded.some(isNonChatModelId)).toBe(false);
+		},
+	);
 
 	test("enables tool search for fallback models", () => {
 		const models = createMetaProviderConfig().models ?? [];

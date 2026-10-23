@@ -886,13 +886,22 @@ describe("Meta bundled models", () => {
 		cacheRead: 0.002,
 		cacheWrite: 0,
 	};
+	const wonderCost = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 0 };
+	// Muse Code subscription only: Meta publishes no per-token rate.
+	const subscriptionOnlyCost = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+	};
+	// "gated": max only with the META_MUSE_USER_AGENT opt-in.
 	const expected = [
 		["muse-spark-1.3", "Muse Spark 1.3", standardCost, "max"],
 		[
 			"muse-spark-1.3-contributor",
 			"Muse Spark 1.3 Contributor",
 			contributorCost,
-			null,
+			"gated",
 		],
 		["muse-spark-1.2", "Muse Spark 1.2", standardCost, null],
 		[
@@ -902,6 +911,25 @@ describe("Meta bundled models", () => {
 			null,
 		],
 		["muse-spark-1.1", "Muse Spark 1.1", standardCost, null],
+		["muse-wonder-1.0", "Muse Wonder 1.0", wonderCost, "max"],
+		[
+			"muse-wonder-1.0-contributor",
+			"Muse Wonder 1.0 Contributor",
+			subscriptionOnlyCost,
+			"gated",
+		],
+		[
+			"muse-wonder-full-1.0",
+			"Muse Wonder Full 1.0",
+			subscriptionOnlyCost,
+			"max",
+		],
+		[
+			"muse-wonder-full-1.0-contributor",
+			"Muse Wonder Full 1.0 Contributor",
+			subscriptionOnlyCost,
+			"gated",
+		],
 	] as const;
 
 	function expectedModels(contributorMax: string | null) {
@@ -916,7 +944,7 @@ describe("Meta bundled models", () => {
 				medium: "medium",
 				high: "high",
 				xhigh: "xhigh",
-				max: id === "muse-spark-1.3-contributor" ? contributorMax : max,
+				max: max === "gated" ? contributorMax : max,
 			},
 			input: ["text", "image"] as Array<"text" | "image">,
 			cost,
@@ -926,13 +954,13 @@ describe("Meta bundled models", () => {
 		}));
 	}
 
-	test("ships the five Muse models in order with their prices and effort maps", async () => {
+	test("ships the nine bundled Muse models in order with their prices and effort maps", async () => {
 		await withMuseUserAgent(undefined, () => {
 			expect(createMetaProviderConfig().models).toEqual(expectedModels(null));
 		});
 	});
 
-	test("exposes Contributor 1.3 max in the bundled models only when opted in", async () => {
+	test("exposes gated Contributor max in the bundled models only when opted in", async () => {
 		await withMuseUserAgent("1", () => {
 			expect(createMetaProviderConfig().models).toEqual(expectedModels("max"));
 		});

@@ -48,7 +48,7 @@ Prefer a static key instead? Set `META_API_KEY` (or `MODEL_API_KEY`) and skip
 
 ## Models
 
-Fallback models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh` (`muse-spark-1.3` additionally supports `max`; `muse-spark-1.3-contributor` does too when [opted in](#contributor-max-opt-in)). The catalog-discovered `muse-wonder-1.0` and `muse-wonder-full-1.0` also support `max`, as do their `-contributor` variants when opted in.
+Bundled models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh`. `muse-spark-1.3`, `muse-wonder-1.0`, and `muse-wonder-full-1.0` additionally support `max`; their `-contributor` variants do too when [opted in](#contributor-max-opt-in). Meta's catalog endpoint has returned bare model IDs without names, prices, or modalities since at least 2026-10-23, so these bundled definitions supply that metadata for known IDs; an unknown ID still appears with default values.
 
 | id | pricing (input/output/cached) $/M |
 | --- | --- |
@@ -57,6 +57,12 @@ Fallback models use a 1,048,576-token context window, up to 256K output tokens, 
 | `muse-spark-1.2` | 1.25 / 4.25 / 0.15 |
 | `muse-spark-1.2-contributor` | 0.10 / 0.20 / 0.002 |
 | `muse-spark-1.1` | 1.25 / 4.25 / 0.15 |
+| `muse-wonder-1.0` | 4.00 / 20.00 / 0.20 |
+| `muse-wonder-1.0-contributor` | no published per-token rate (Muse Code subscription); Pi shows $0 |
+| `muse-wonder-full-1.0` | no published per-token rate (Muse Code subscription); Pi shows $0 |
+| `muse-wonder-full-1.0-contributor` | no published per-token rate (Muse Code subscription); Pi shows $0 |
+
+The catalog also lists Meta's non-chat models, which are billed per generated image, per hour of audio, or per video frame rather than per token: the `muse-image-*`, `muse-voice-*`, and `sam-*` families. The extension hides them from the chat model list, including entries an earlier release cached in `models-store.json`.
 
 > **Contributor-model privacy:** discounted contributor models allow Meta to use prompts and completions for product improvement, including training future Meta models. Use a standard model such as `muse-spark-1.3` if you do not want the contributor terms. See [Meta's model documentation](https://dev.meta.ai/docs/models).
 

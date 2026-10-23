@@ -1,8 +1,5 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type {
 	Context,
 	Model,
@@ -24,6 +21,8 @@ import {
 	refreshMetaModels,
 	toProviderModels,
 } from "../extensions/meta.ts";
+import { MAX_EFFORT_MODEL_IDS } from "../src/meta/muse-policy.ts";
+import { resolveLiveMetaApiKey } from "./live-key.ts";
 import { withMuseUserAgent } from "./muse-env.ts";
 
 const LIVE_CACHE_MODEL = "muse-spark-1.2-contributor";
@@ -38,34 +37,6 @@ function toStreamContext(context: Context): Parameters<typeof streamSimple>[1] {
 	return (
 		typeof normalize === "function" ? normalize(context) : context
 	) as Parameters<typeof streamSimple>[1];
-}
-
-function resolveLiveMetaApiKey(): string | undefined {
-	for (const value of [
-		process.env.PI_META_LIVE_API_KEY,
-		process.env.META_API_KEY,
-		process.env.MODEL_API_KEY,
-	]) {
-		if (typeof value === "string" && value.trim()) return value.trim();
-	}
-	try {
-		const auth = JSON.parse(
-			readFileSync(join(homedir(), ".pi/agent/auth.json"), "utf8"),
-		) as { meta?: { access?: unknown; expires?: unknown } };
-		// auth.meta.expires is epoch milliseconds; an expired token must not turn
-		// every test run into a hard 401 — treat it as no credential.
-		if (
-			typeof auth.meta?.expires === "number" &&
-			auth.meta.expires <= Date.now()
-		) {
-			return undefined;
-		}
-		return typeof auth.meta?.access === "string" && auth.meta.access.trim()
-			? auth.meta.access.trim()
-			: undefined;
-	} catch {
-		return undefined;
-	}
 }
 
 const liveApiKey = resolveLiveMetaApiKey();
@@ -177,12 +148,13 @@ describe("Meta Responses cache and reasoning contracts", () => {
 		const models = await withMuseUserAgent(undefined, fallbackModels);
 		for (const model of models) {
 			expect(model.thinkingLevelMap?.off).toBeNull();
-			if (model.id === "muse-spark-1.3") {
-				// Live-probed 2026-09-06: muse-spark-1.3 accepts effort "max".
-				expect(model.thinkingLevelMap?.max).toBe("max");
+			if (MAX_EFFORT_MODEL_IDS.has(model.id)) {
+				// Live-probed 2026-09-06 (Spark 1.3) and per PR #32 (Wonder):
+				// these accept effort "max" with any User-Agent.
+				expect(model.thinkingLevelMap?.max, model.id).toBe("max");
 			} else {
-				// 1.3-contributor needs the opt-in Muse fingerprint for "max".
-				expect(model.thinkingLevelMap?.max).toBeNull();
+				// Contributor variants need the opt-in Muse fingerprint for "max".
+				expect(model.thinkingLevelMap?.max, model.id).toBeNull();
 			}
 		}
 		const catalogued = toProviderModels({

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { META_API_BASE_URL, META_PROVIDER_ID } from "../src/meta/constants.ts";
 import {
 	fallbackModels,
+	isNonChatModelId,
 	metaFallbackCost,
 	restoreProviderModels,
 	toProviderModels,
@@ -366,5 +367,126 @@ describe("Meta cached model decoding", () => {
 		if (model.compat && "supportsToolSearch" in model.compat)
 			model.compat.supportsToolSearch = false;
 		expect(cached).toEqual(snapshot);
+	});
+});
+
+describe("Meta catalog families", () => {
+	const nonChatIds = ["sam-3.1", "muse-voice-transcribe-1.0", "muse-image-1.0"];
+
+	test("recognizes the per-image, per-hour, and per-frame families by prefix", () => {
+		for (const id of [
+			...nonChatIds,
+			"sam-4.0",
+			"muse-image-1.1",
+			"muse-voice-translate-2.0",
+		]) {
+			expect(isNonChatModelId(id), id).toBe(true);
+		}
+		for (const id of [
+			"muse-spark-1.3",
+			"muse-wonder-1.0",
+			"muse-next-1.0",
+			"sam",
+			"samba-1.0",
+		]) {
+			expect(isNonChatModelId(id), id).toBe(false);
+		}
+	});
+
+	test("drops non-chat catalog entries even when they carry metadata", () => {
+		const models = toProviderModels({
+			data: [
+				{ id: "muse-spark-1.3" },
+				...nonChatIds.map((id) => ({
+					id,
+					metadata: {
+						"muse-code": {
+							name: "Looks like a chat model",
+							reasoning: true,
+							modalities: { input: ["text", "image"] },
+						},
+					},
+				})),
+				{ id: "muse-wonder-1.0" },
+			],
+		});
+
+		expect(models.map(({ id }) => id)).toEqual([
+			"muse-spark-1.3",
+			"muse-wonder-1.0",
+		]);
+	});
+
+	test("drops non-chat models persisted by an earlier release on restore", () => {
+		// Shape of the `meta` entry 0.7.4 wrote from the bare 2026-10-23 catalog.
+		const persisted = [
+			"muse-wonder-full-1.0-contributor",
+			"muse-wonder-full-1.0",
+			"muse-wonder-1.0-contributor",
+			"muse-wonder-1.0",
+			"sam-3.1",
+			"muse-spark-1.3-contributor",
+			"muse-voice-transcribe-1.0",
+			"muse-spark-1.3",
+			"muse-image-1.0",
+			"muse-spark-1.2-contributor",
+			"muse-spark-1.2",
+			"muse-spark-1.1",
+		].map((id) => ({
+			id,
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+			baseUrl: META_API_BASE_URL,
+			name: id,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_048_576,
+			maxTokens: 256_000,
+		}));
+
+		const restored = restoreProviderModels(persisted).map(({ id }) => id);
+
+		expect(restored).toEqual(
+			persisted.map(({ id }) => id).filter((id) => !nonChatIds.includes(id)),
+		);
+		expect(restored.some(isNonChatModelId)).toBe(false);
+	});
+
+	test("bundles the Wonder models with Meta's published rate and image input", async () => {
+		await withMuseUserAgent(undefined, () => {
+			const byId = Object.fromEntries(
+				fallbackModels().map((model) => [model.id, model]),
+			);
+			expect(byId["muse-wonder-1.0"]).toMatchObject({
+				name: "Muse Wonder 1.0",
+				input: ["text", "image"],
+				cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 0 },
+				contextWindow: 1_048_576,
+				thinkingLevelMap: { max: "max" },
+			});
+			expect(metaFallbackCost("muse-wonder-1.0")?.output).toBe(20);
+			// Subscription-only models have no published per-token rate.
+			for (const id of [
+				"muse-wonder-full-1.0",
+				"muse-wonder-1.0-contributor",
+				"muse-wonder-full-1.0-contributor",
+			]) {
+				expect(byId[id]?.cost, id).toEqual({
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+				});
+				expect(byId[id]?.input, id).toEqual(["text", "image"]);
+			}
+			expect(byId["muse-wonder-full-1.0"]?.thinkingLevelMap?.max).toBe("max");
+			expect(
+				byId["muse-wonder-1.0-contributor"]?.thinkingLevelMap?.max,
+			).toBeNull();
+			expect(
+				byId["muse-wonder-full-1.0-contributor"]?.thinkingLevelMap?.max,
+			).toBeNull();
+		});
 	});
 });
