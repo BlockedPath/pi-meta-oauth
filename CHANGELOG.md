@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Hide Meta's non-chat models from the chat model list. Meta's catalog endpoint has returned bare entries without `muse-code` metadata since at least 2026-10-23, so `sam-3.1`, `muse-voice-transcribe-1.0`, and `muse-image-1.0` appeared as $0 chat models with thinking enabled. The `muse-image-*`, `muse-voice-*`, and `sam-*` families are now filtered by prefix when decoding the catalog and when restoring a cached entry, so a catalog persisted by 0.7.4 is cleaned on the next start rather than only after a successful refresh.
+- Hide Meta's non-chat models from the chat model list. Meta's catalog endpoint has returned bare entries without `muse-code` metadata since at least 2026-10-23, so `sam-3.1`, `muse-voice-transcribe-1.0`, and `muse-image-1.0` appeared as $0 chat models with thinking enabled. The `muse-image-*`, `muse-voice-*`, and `sam-*` families are now filtered by prefix when decoding the catalog and when restoring a cached entry, so a catalog persisted by 0.7.4 is cleaned on the next start rather than only after a successful refresh. Bundled model IDs also restore with their bundled name, price, and image input, so that cache no longer shows Wonder as a $0 text-only model until the next refresh; cached limits, effort names, headers, and compat flags are kept, and unknown IDs restore every cached field.
 - Run the live catalog canary with any resolvable key. It only ran with an explicit `PI_META_LIVE_API_KEY`, so `bun run test:live` skipped the one probe that would have caught the bare catalog.
 
 ### Added

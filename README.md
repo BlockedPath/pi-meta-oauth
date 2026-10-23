@@ -141,10 +141,11 @@ also bypasses isolation and can run these probes when credentials are available.
 The cache probe makes two billable Responses requests plus one retry on a cache
 miss. The fingerprint probe makes two tiny Contributor-`max` requests; it sends
 the header directly, independently of `META_MUSE_USER_AGENT`. The catalog probe
-runs when `PI_META_LIVE_API_KEY` is set. Cache and fingerprint probes resolve
-credentials from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an
-unexpired minted key in `~/.pi/agent/auth.json`, in that order. Probes skip when
-no usable credential exists.
+makes one catalog request and fails when a live model ID has neither a bundled
+definition nor a non-chat prefix. All three probes resolve credentials from
+`PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired minted
+key in `~/.pi/agent/auth.json`, in that order, and skip when no usable
+credential exists.
 
 ```bash
 bun run test:live tests/meta-cache.test.ts

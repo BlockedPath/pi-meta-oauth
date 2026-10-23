@@ -132,6 +132,10 @@ export function isNonChatModelId(id: string): boolean {
 	return NON_CHAT_MODEL_ID_PREFIXES.some((prefix) => id.startsWith(prefix));
 }
 
+function isBundledModelId(id: string): boolean {
+	return FALLBACK_DEFINITIONS.some((model) => model.id === id);
+}
+
 function nonemptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -374,7 +378,14 @@ function storedCost(
 	return cost;
 }
 
-/** Cache contents cross the same untrusted-data boundary as the remote catalog. */
+/**
+ * Cache contents cross the same untrusted-data boundary as the remote catalog.
+ * For bundled IDs the name, price, and input come from FALLBACK_DEFINITIONS:
+ * the bare catalog cannot have advertised them, so a cached copy is at best an
+ * older release's bundled value and at worst its unknown-model default (0.7.4
+ * persisted Wonder as a $0 text-only model). Cached limits, effort names,
+ * headers, and compat flags are kept; unknown IDs restore every cached field.
+ */
 export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 	if (!Array.isArray(value)) return [];
 	const models: MetaProviderModel[] = [];
@@ -390,10 +401,13 @@ export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 		// A catalog persisted by an earlier release may hold non-chat IDs.
 		if (!id || seen.has(id) || isNonChatModelId(id)) continue;
 		const fallback = defaultModel(id);
+		const bundled = isBundledModelId(id);
 		models.push(
 			gateMuseMaxEffort({
 				...fallback,
-				name: nonemptyString(entry.name) ?? fallback.name,
+				name: bundled
+					? fallback.name
+					: (nonemptyString(entry.name) ?? fallback.name),
 				api: "openai-responses",
 				// The extension only persists the direct endpoint; a cached URL must never redirect the key.
 				baseUrl: META_API_BASE_URL,
@@ -405,8 +419,10 @@ export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 					entry.thinkingLevelMap,
 					fallback.thinkingLevelMap ?? {},
 				),
-				input: modelInput(entry.input, fallback.input),
-				cost: storedCost(entry.cost, fallback.cost),
+				input: bundled
+					? fallback.input
+					: modelInput(entry.input, fallback.input),
+				cost: bundled ? fallback.cost : storedCost(entry.cost, fallback.cost),
 				contextWindow: positiveInteger(
 					entry.contextWindow,
 					fallback.contextWindow,

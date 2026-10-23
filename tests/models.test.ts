@@ -195,8 +195,10 @@ describe("Meta cached model decoding", () => {
 			cacheRead: 0.3,
 			cacheWrite: 0,
 		};
+		// Only unknown IDs keep cached prices; bundled IDs take theirs from the table.
 		const cached = {
 			...requiredModel(fallbackModels()),
+			id: "muse-next-1.0",
 			provider: META_PROVIDER_ID,
 			api: "openai-responses",
 			cost: {
@@ -272,10 +274,10 @@ describe("Meta cached model decoding", () => {
 		]);
 	});
 
-	test("repairs malformed cached fields and preserves valid overrides", () => {
+	test("repairs malformed cached fields and preserves valid overrides on unknown IDs", () => {
 		const [model] = restoreProviderModels([
 			{
-				id: "muse-spark-1.3",
+				id: "muse-next-1.0",
 				provider: META_PROVIDER_ID,
 				api: "openai-responses",
 				name: 42,
@@ -297,13 +299,13 @@ describe("Meta cached model decoding", () => {
 		]);
 		if (!model) throw new Error("Expected a restored model");
 		expect(model).toMatchObject({
-			name: "Muse Spark 1.3",
+			name: "Muse Next 1.0",
 			baseUrl: META_API_BASE_URL,
 			reasoning: true,
-			input: ["text", "image"],
+			input: ["text"],
 			contextWindow: 1_048_576,
 			maxTokens: 256_000,
-			cost: { input: 1.25, output: 7, cacheRead: 0.15, cacheWrite: 0.5 },
+			cost: { input: 0, output: 7, cacheRead: 0, cacheWrite: 0.5 },
 			thinkingLevelMap: { low: null, high: "high", xhigh: "deep" },
 			headers: { "X-Valid": "yes" },
 			compat: {
@@ -313,6 +315,55 @@ describe("Meta cached model decoding", () => {
 		});
 		expect(model.compat).not.toHaveProperty("unsafe");
 		expect(model.compat).not.toHaveProperty("supportsDeveloperRole");
+	});
+
+	test("restores bundled IDs with their bundled name, price, and input over stale cached values", () => {
+		// Shape 0.7.4 persisted from the bare catalog: id-derived name, text-only,
+		// $0. Limits, effort names, headers, and compat still come from the cache.
+		const stale = (id: string) => ({
+			id,
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+			baseUrl: META_API_BASE_URL,
+			name: id,
+			reasoning: true,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1_007_997,
+			maxTokens: 131_072,
+			thinkingLevelMap: { high: "deep" },
+			headers: { "X-Cached": "yes" },
+			compat: { supportsToolSearch: false },
+		});
+		const byId = Object.fromEntries(
+			restoreProviderModels([
+				stale("muse-wonder-1.0"),
+				{ ...stale("muse-spark-1.3"), cost: { input: 9, output: 9 } },
+				stale("muse-next-1.0"),
+			]).map((model) => [model.id, model]),
+		);
+
+		expect(byId["muse-wonder-1.0"]).toMatchObject({
+			name: "Muse Wonder 1.0",
+			input: ["text", "image"],
+			cost: { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 0 },
+			contextWindow: 1_007_997,
+			maxTokens: 131_072,
+			thinkingLevelMap: { high: "deep" },
+			headers: { "X-Cached": "yes" },
+			compat: { supportsToolSearch: false },
+		});
+		expect(byId["muse-spark-1.3"]).toMatchObject({
+			name: "Muse Spark 1.3",
+			input: ["text", "image"],
+			cost: { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 0 },
+		});
+		// Unknown IDs keep what the cache says, since only the catalog knows them.
+		expect(byId["muse-next-1.0"]).toMatchObject({
+			name: "muse-next-1.0",
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		});
 	});
 
 	test("restore applies known max policy over stale cached values", async () => {
