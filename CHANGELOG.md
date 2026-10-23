@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-10-23
+
 ### Added
 
 - Reasoning effort `max` on the Muse Wonder models: `muse-wonder-1.0` and `muse-wonder-full-1.0` expose it unconditionally, while `muse-wonder-1.0-contributor` and `muse-wonder-full-1.0-contributor` are gated behind the existing `META_MUSE_USER_AGENT=1` opt-in (including the Muse fingerprint on their direct requests), matching `muse-spark-1.3-contributor`. The policy applies to catalog and cached models alike, so a stale cached `max: null` no longer masks known support.
@@ -117,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.0...v0.7.1
