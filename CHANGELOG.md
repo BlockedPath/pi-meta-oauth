@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reasoning effort `max` on the Muse Wonder models: `muse-wonder-1.0` and `muse-wonder-full-1.0` expose it unconditionally, while `muse-wonder-1.0-contributor` and `muse-wonder-full-1.0-contributor` are gated behind the existing `META_MUSE_USER_AGENT=1` opt-in (including the Muse fingerprint on their direct requests), matching `muse-spark-1.3-contributor`. The policy applies to catalog and cached models alike, so a stale cached `max: null` no longer masks known support.
 
+### Fixed
+
+- Support Pi 1.x (verified against 1.4.0). The peer range now admits every Pi release below 2.0.0 instead of stopping at 0.87, and CI typechecks and tests the extension against Pi 1.4.0 alongside 0.83–0.87. Pi 0.99 made `ProviderConfig.models` a union of chat, image, and classifier configs, which stripped the chat-only fields (`reasoning`, `thinkingLevelMap`, `contextWindow`, `maxTokens`) from `MetaProviderModel` and failed the typecheck; the type now narrows to the chat member. No runtime behavior changes: Pi 1.4.0 still applies request headers above its new client-identity `User-Agent`, refreshes the extension's catalog after the built-in pi.dev overlay, treats `Login cancelled` as a user cancel, and persists the `source` marker verbatim.
+
 ## [0.7.3] - 2026-10-13
 
 - No runtime changes. Repository-only release: the sole commit since 0.7.2 adds the Amp orb Tailscale setup scripts (`.agents/tailscale-install`, `.agents/tailscale-up`, `.agents/resume`) ([#30](https://github.com/BlockedPath/pi-meta-oauth/pull/30)), which are outside the package's `files` list, so the published tarball matches 0.7.2 apart from the version and this changelog.
