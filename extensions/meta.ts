@@ -15,7 +15,11 @@ export {
 	MUSE_USER_AGENT_ENV_VAR,
 } from "../src/meta/constants.ts";
 export { refreshMetaModels } from "../src/meta/model-store.ts";
-export { metaFallbackCost, toProviderModels } from "../src/meta/models.ts";
+export {
+	isNonChatModelId,
+	metaFallbackCost,
+	toProviderModels,
+} from "../src/meta/models.ts";
 export { isMuseUserAgentEnabled } from "../src/meta/muse-policy.ts";
 export {
 	loginMeta,

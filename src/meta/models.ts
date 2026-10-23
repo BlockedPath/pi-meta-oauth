@@ -21,6 +21,24 @@ const CONTRIBUTOR_COST = {
 	cacheRead: 0.002,
 	cacheWrite: 0,
 };
+/** Meta Model API list price for muse-wonder-1.0 (dev.meta.ai pricing page, 2026-10-23). */
+const WONDER_COST = {
+	input: 4,
+	output: 20,
+	cacheRead: 0.2,
+	cacheWrite: 0,
+};
+/**
+ * Muse Wonder Full and the Wonder Contributor variants are reachable only
+ * through a Muse Code subscription; Meta publishes no per-token rate for
+ * them, so Pi shows $0. This is a representation of "unpriced", not a fact.
+ */
+const SUBSCRIPTION_ONLY_COST = {
+	input: 0,
+	output: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+};
 const UNKNOWN_MODEL_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const THINKING_LEVELS = [
 	"minimal",
@@ -32,7 +50,13 @@ const THINKING_LEVELS = [
 ] as const;
 type ThinkingLevelMap = NonNullable<MetaProviderModel["thinkingLevelMap"]>;
 
-/** Data-only definitions; callers always receive fresh model objects. */
+/**
+ * Data-only definitions; callers always receive fresh model objects. The live
+ * catalog has carried no `metadata["muse-code"]` block since at least
+ * 2026-10-23, so names, prices, and image input for known IDs come from here.
+ * Spark first keeps the long-standing default model; after the first refresh
+ * the catalog's own order wins anyway.
+ */
 const FALLBACK_DEFINITIONS = [
 	{
 		id: "muse-spark-1.3",
@@ -64,7 +88,53 @@ const FALLBACK_DEFINITIONS = [
 		cost: STANDARD_COST,
 		max: false,
 	},
+	{
+		id: "muse-wonder-1.0",
+		name: "Muse Wonder 1.0",
+		cost: WONDER_COST,
+		max: true,
+	},
+	{
+		id: "muse-wonder-1.0-contributor",
+		name: "Muse Wonder 1.0 Contributor",
+		cost: SUBSCRIPTION_ONLY_COST,
+		max: false,
+	},
+	{
+		id: "muse-wonder-full-1.0",
+		name: "Muse Wonder Full 1.0",
+		cost: SUBSCRIPTION_ONLY_COST,
+		max: true,
+	},
+	{
+		id: "muse-wonder-full-1.0-contributor",
+		name: "Muse Wonder Full 1.0 Contributor",
+		cost: SUBSCRIPTION_ONLY_COST,
+		max: false,
+	},
 ] as const;
+
+/**
+ * Catalog families Meta bills per generated image, per hour of audio, or per
+ * video frame instead of per token (dev.meta.ai pricing page, 2026-10-23):
+ * Muse Image, Muse Voice Transcribe, and Segment Anything. They share the
+ * catalog with the chat models but are not chat models, so neither the live
+ * catalog nor a cached entry may list them as one. Prefixes, not exact IDs,
+ * so a new version of a family stays hidden without a code change.
+ */
+export const NON_CHAT_MODEL_ID_PREFIXES = [
+	"muse-image-",
+	"muse-voice-",
+	"sam-",
+] as const;
+
+export function isNonChatModelId(id: string): boolean {
+	return NON_CHAT_MODEL_ID_PREFIXES.some((prefix) => id.startsWith(prefix));
+}
+
+function isBundledModelId(id: string): boolean {
+	return FALLBACK_DEFINITIONS.some((model) => model.id === id);
+}
 
 function nonemptyString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -166,7 +236,7 @@ export function toProviderModels(catalog: unknown): MetaProviderModel[] {
 	for (const value of data) {
 		const entry = asRecord(value);
 		const id = nonemptyString(entry?.id);
-		if (!id || seen.has(id)) continue;
+		if (!id || seen.has(id) || isNonChatModelId(id)) continue;
 		const metadata = asRecord(asRecord(entry?.metadata)?.["muse-code"]);
 		if (metadata?.is_hidden === true) continue;
 		const fallback = defaultModel(id);
@@ -308,7 +378,14 @@ function storedCost(
 	return cost;
 }
 
-/** Cache contents cross the same untrusted-data boundary as the remote catalog. */
+/**
+ * Cache contents cross the same untrusted-data boundary as the remote catalog.
+ * For bundled IDs the name, price, and input come from FALLBACK_DEFINITIONS:
+ * the bare catalog cannot have advertised them, so a cached copy is at best an
+ * older release's bundled value and at worst its unknown-model default (0.7.4
+ * persisted Wonder as a $0 text-only model). Cached limits, effort names,
+ * headers, and compat flags are kept; unknown IDs restore every cached field.
+ */
 export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 	if (!Array.isArray(value)) return [];
 	const models: MetaProviderModel[] = [];
@@ -321,12 +398,16 @@ export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 		)
 			continue;
 		const id = nonemptyString(entry.id);
-		if (!id || seen.has(id)) continue;
+		// A catalog persisted by an earlier release may hold non-chat IDs.
+		if (!id || seen.has(id) || isNonChatModelId(id)) continue;
 		const fallback = defaultModel(id);
+		const bundled = isBundledModelId(id);
 		models.push(
 			gateMuseMaxEffort({
 				...fallback,
-				name: nonemptyString(entry.name) ?? fallback.name,
+				name: bundled
+					? fallback.name
+					: (nonemptyString(entry.name) ?? fallback.name),
 				api: "openai-responses",
 				// The extension only persists the direct endpoint; a cached URL must never redirect the key.
 				baseUrl: META_API_BASE_URL,
@@ -338,8 +419,10 @@ export function restoreProviderModels(value: unknown): MetaProviderModel[] {
 					entry.thinkingLevelMap,
 					fallback.thinkingLevelMap ?? {},
 				),
-				input: modelInput(entry.input, fallback.input),
-				cost: storedCost(entry.cost, fallback.cost),
+				input: bundled
+					? fallback.input
+					: modelInput(entry.input, fallback.input),
+				cost: bundled ? fallback.cost : storedCost(entry.cost, fallback.cost),
 				contextWindow: positiveInteger(
 					entry.contextWindow,
 					fallback.contextWindow,
