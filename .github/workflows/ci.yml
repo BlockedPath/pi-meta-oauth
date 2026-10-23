@@ -86,7 +86,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pi-version: ["0.83.0", "0.84.0", "0.85.0", "0.86.0", "0.87.1"]
+        pi-version: ["0.83.0", "0.84.0", "0.85.0", "0.86.0", "0.87.1", "1.4.0"]
 
     steps:
       - name: Check out repository
@@ -103,7 +103,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install compatibility peers
-        if: matrix.pi-version != '0.87.1'
+        if: matrix.pi-version != '1.4.0'
         env:
           PI_VERSION: ${{ matrix.pi-version }}
         run: >-

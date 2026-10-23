@@ -1,6 +1,14 @@
 import type { ProviderConfig } from "@earendil-works/pi-coding-agent";
 
-type ProviderModel = NonNullable<ProviderConfig["models"]>[number];
+/**
+ * Pi 0.99+ registers chat, image, and classifier model configs as a union; Omit
+ * over that union keeps only their shared keys. Narrow to the chat member, which
+ * is the whole element type on older Pi versions.
+ */
+type ProviderModel = Extract<
+	NonNullable<ProviderConfig["models"]>[number],
+	{ reasoning: boolean }
+>;
 
 /** Responses hints spanning the supported Pi versions, including newer flags. */
 export interface MetaResponsesCompat {

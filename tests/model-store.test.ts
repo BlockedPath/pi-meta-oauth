@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type {
+	Model,
 	ModelsStoreEntry,
 	RefreshModelsContext,
 } from "@earendil-works/pi-ai";
@@ -18,6 +19,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 		status,
 		headers: { "Content-Type": "application/json" },
 	});
+}
+
+/** Pi 1.x stores every model type in one entry; this provider only persists chat models. */
+function storedChatModel(
+	entry: ModelsStoreEntry | null | undefined,
+	index = 0,
+): Model<"openai-responses"> | undefined {
+	return entry?.models[index] as Model<"openai-responses"> | undefined;
 }
 
 function refreshContext(
@@ -137,7 +146,7 @@ describe("Meta catalog persistence compatibility", () => {
 		});
 		const models = await refreshMetaModels(context, catalogFetch());
 		const fresh = models[0];
-		const stored = persisted?.models[0];
+		const stored = storedChatModel(persisted);
 		if (!fresh || !stored)
 			throw new Error("Expected fresh and persisted models");
 		expect(stored).toMatchObject({
@@ -208,7 +217,7 @@ describe("Meta catalog persistence compatibility", () => {
 	test("publishing cannot mutate the returned fresh catalog", async () => {
 		const context = refreshContext({
 			publish: async (publication: { persist?: ModelsStoreEntry | null }) => {
-				const model = publication.persist?.models[0];
+				const model = storedChatModel(publication.persist);
 				if (!model) throw new Error("Expected publication");
 				model.cost.input = 42;
 				if (model.compat && "supportsToolSearch" in model.compat)
@@ -482,7 +491,7 @@ describe("Meta catalog persistence compatibility", () => {
 		const cached = await withMuseUserAgent("1", () =>
 			cachedCatalog("muse-spark-1.3-contributor"),
 		);
-		const model = cached.models[0];
+		const model = storedChatModel(cached);
 		if (!model) throw new Error("Expected cached Contributor");
 		model.thinkingLevelMap = { ...model.thinkingLevelMap, max: "max" };
 		await withMuseUserAgent(undefined, async () => {

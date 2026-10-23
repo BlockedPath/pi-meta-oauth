@@ -32,13 +32,13 @@
     "image": "https://raw.githubusercontent.com/BlockedPath/pi-meta-oauth/main/preview.png"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": ">=0.83.0 <0.88.0",
-    "@earendil-works/pi-coding-agent": ">=0.83.0 <0.88.0"
+    "@earendil-works/pi-ai": ">=0.83.0 <2.0.0",
+    "@earendil-works/pi-coding-agent": ">=0.83.0 <2.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
-    "@earendil-works/pi-ai": "0.87.1",
-    "@earendil-works/pi-coding-agent": "0.87.1",
+    "@earendil-works/pi-ai": "1.4.0",
+    "@earendil-works/pi-coding-agent": "1.4.0",
     "bun-types": "latest",
     "typescript": "^5.9.0"
   },

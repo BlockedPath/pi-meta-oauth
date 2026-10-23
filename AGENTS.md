@@ -17,6 +17,16 @@ modules live under `src/meta/`, which must remain included in the package's
 `files` list. Keep provider wiring, OAuth, model decoding, persistence, and
 request policy separate; preserve the entrypoint's existing named exports.
 
+Pi 0.99+ types `ProviderConfig.models` as a union of chat, image, and classifier
+configs. `MetaProviderModel` in `src/meta/types.ts` narrows that element type to
+the chat member before applying `Omit`, which keeps `reasoning`,
+`thinkingLevelMap`, `contextWindow`, and `maxTokens` on every supported Pi
+version (the narrowing is a no-op on Pi 0.83–0.87). Tests that read models back
+out of a `ModelsStoreEntry` must narrow the same way, since that list holds
+every model type on Pi 1.x. The CI matrix pins each supported Pi line and the
+lockfile's version is the leg that skips the compatibility reinstall; add a leg
+when widening the peer range.
+
 Use `bun run check` for lint, strict typecheck, and hermetic tests. `bun run test`
 runs through `scripts/test.ts`, which strips credentials and isolates the child
 home without changing the caller. Direct `bun test` bypasses that protection.
