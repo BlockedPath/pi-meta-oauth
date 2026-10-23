@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-10-23
+
 ### Fixed
 
 - Hide Meta's non-chat models from the chat model list. Meta's catalog endpoint has returned bare entries without `muse-code` metadata since at least 2026-10-23, so `sam-3.1`, `muse-voice-transcribe-1.0`, and `muse-image-1.0` appeared as $0 chat models with thinking enabled. The `muse-image-*`, `muse-voice-*`, and `sam-*` families are now filtered by prefix when decoding the catalog and when restoring a cached entry, so a catalog persisted by 0.7.4 is cleaned on the next start rather than only after a successful refresh. Bundled model IDs also restore with their bundled name, price, and image input, so that cache no longer shows Wonder as a $0 text-only model until the next refresh; cached limits, effort names, headers, and compat flags are kept, and unknown IDs restore every cached field.
@@ -128,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.5...HEAD
+[0.7.5]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.1...v0.7.2
