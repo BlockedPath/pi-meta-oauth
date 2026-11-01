@@ -52,6 +52,16 @@ Muse Spark on `api.meta.ai` returns no useful cache hits on `/v1/chat/completion
 
 `tests/meta-cache.test.ts` contains hermetic wire-contract coverage plus an optional live cache probe. The live probe resolves a key from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired `meta.access` entry in `~/.pi/agent/auth.json`. It makes real billable requests whenever a credential resolves; do not put a live key in CI.
 
+## Tool name aliases
+
+Keep tool-name translation request-local in `src/meta/tool-aliases.ts`, after the
+caller's payload callback and scoped to the actual Meta model's direct endpoint.
+Translate definitions, replayed calls, and explicit choices together; restore Pi
+names in every stream event and final result without mutating the caller's tools
+or transcript. Preserve a live downstream partial without sharing upstream tool
+blocks, which can acquire new wire names between events. Cover collisions,
+concurrent requests, and multi-turn replay in `tests/tool-aliases.test.ts`.
+
 ## Muse User-Agent opt-in
 
 `muse-spark-1.3-contributor` accepts reasoning effort `max` only with the captured Muse CLI `User-Agent` (`MUSE_USER_AGENT`); `muse-wonder-1.0-contributor` and `muse-wonder-full-1.0-contributor` are gated the same way. Keep this strictly opt-in via `META_MUSE_USER_AGENT`: the stream adapter must use the actual request model to scope headers to the Meta provider, the models in `MUSE_USER_AGENT_MODEL_IDS`, and the direct `https://api.meta.ai/v1` endpoint, and it must never override an explicit `User-Agent`. Route every model list (fallbacks, catalog, cached restore) through `gateMuseMaxEffort()` so Contributor `max` is exposed only when opted in. The standard Wonder models (`muse-wonder-1.0`, `muse-wonder-full-1.0`) get unconditional `max` from `MAX_EFFORT_MODEL_IDS` in the same gate, and their bundled definitions in `models.ts` agree. Tests that depend on the flag must use `tests/muse-env.ts` to stay hermetic.
