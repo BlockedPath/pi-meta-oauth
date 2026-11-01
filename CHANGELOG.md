@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Translate the function tool names `bash`, `shell`, and `web_search` to `execute_command`, `execute_shell`, and `search_web` on direct Meta requests. Restore original names in Pi's streamed tool calls and saved messages, alias conversation history and explicit tool choices consistently, and avoid collisions with custom tool names. This addresses reported tool-list-based denials.
+
 ## [0.7.5] - 2026-10-23
 
 ### Fixed

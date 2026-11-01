@@ -46,6 +46,23 @@ The access key is re-minted daily.
 Prefer a static key instead? Set `META_API_KEY` (or `MODEL_API_KEY`) and skip
 `/login meta` entirely — requests use it directly.
 
+### Tool names on Meta requests
+
+For requests to `https://api.meta.ai/v1`, the extension translates these function
+tool names automatically:
+
+| Pi tool | Name sent to Meta |
+| --- | --- |
+| `bash` | `execute_command` |
+| `shell` | `execute_shell` |
+| `web_search` | `search_web` |
+
+Pi receives the original names back for execution, streaming updates, and saved
+sessions. Replayed tool calls and explicit tool choices use the same aliases.
+If another tool already has an alias's name, a numeric suffix avoids a collision.
+This addresses reported denials based on the tool list; Meta can still reject a
+request with `client_attestation_denied`.
+
 ## Models
 
 Bundled models use a 1,048,576-token context window, up to 256K output tokens, image input, and reasoning levels `minimal`, `low`, `medium`, `high`, and `xhigh`. `muse-spark-1.3`, `muse-wonder-1.0`, and `muse-wonder-full-1.0` additionally support `max`; their `-contributor` variants do too when [opted in](#contributor-max-opt-in). Meta's catalog endpoint has returned bare model IDs without names, prices, or modalities since at least 2026-10-23, so these bundled definitions supply that metadata for known IDs; an unknown ID still appears with default values.
