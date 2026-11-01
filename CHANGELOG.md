@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-11-01
+
 ### Added
 
 - Translate the function tool names `bash`, `shell`, and `web_search` to `execute_command`, `execute_shell`, and `search_web` on direct Meta requests. Restore original names in Pi's streamed tool calls and saved messages, alias conversation history and explicit tool choices consistently, and avoid collisions with custom tool names. This addresses reported tool-list-based denials.
@@ -134,7 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.5...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.6...HEAD
+[0.7.6]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.2...v0.7.3
