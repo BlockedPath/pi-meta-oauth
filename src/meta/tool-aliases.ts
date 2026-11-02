@@ -3,9 +3,11 @@ import type {
 	AssistantMessageEvent,
 	ToolCall,
 } from "@earendil-works/pi-ai";
+import { TOOL_ALIASES_ENV_VAR } from "./constants.ts";
 import { asRecord } from "./http.ts";
+import type { MetaEnv } from "./types.ts";
 
-const TOOL_ALIASES = new Map([
+const BUILT_IN_TOOL_ALIASES: ReadonlyMap<string, string> = new Map([
 	["bash", "execute_command"],
 	["shell", "execute_shell"],
 	["web_search", "search_web"],
@@ -16,6 +18,33 @@ const TOOL_ALIASES = new Map([
 	["edit_file", "edit_file_content"],
 	["search", "search_content"],
 ]);
+
+/** The Responses API's function-name charset and length limit. */
+const FUNCTION_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Built-in aliases merged with `META_TOOL_ALIASES`. Entries are `name=alias`,
+ * separated by commas; a later entry for the same name wins. `name=` or
+ * `name=name` turns an alias off. Malformed entries and names outside the
+ * function-name charset are ignored rather than failing every request.
+ */
+export function resolveToolAliases(
+	env: MetaEnv = process.env,
+): ReadonlyMap<string, string> {
+	const configured = env[TOOL_ALIASES_ENV_VAR];
+	if (!configured?.trim()) return BUILT_IN_TOOL_ALIASES;
+	const aliases = new Map(BUILT_IN_TOOL_ALIASES);
+	for (const entry of configured.split(",")) {
+		const separator = entry.indexOf("=");
+		if (separator < 0) continue;
+		const original = entry.slice(0, separator).trim();
+		const alias = entry.slice(separator + 1).trim();
+		if (!FUNCTION_NAME.test(original)) continue;
+		if (!alias || alias === original) aliases.delete(original);
+		else if (FUNCTION_NAME.test(alias)) aliases.set(original, alias);
+	}
+	return aliases;
+}
 
 function namedTool(value: unknown): Record<string, unknown> | undefined {
 	const record = asRecord(value);
@@ -30,6 +59,10 @@ function namedTool(value: unknown): Record<string, unknown> | undefined {
 export class MetaToolAliases {
 	private readonly originalNames = new Map<string, string>();
 	private readonly messages = new WeakMap<AssistantMessage, AssistantMessage>();
+
+	constructor(
+		private readonly table: ReadonlyMap<string, string> = resolveToolAliases(),
+	) {}
 
 	rewritePayload(payload: unknown): unknown {
 		this.originalNames.clear();
@@ -52,7 +85,7 @@ export class MetaToolAliases {
 		}
 
 		const aliases = new Map<string, string>();
-		for (const [original, preferred] of TOOL_ALIASES) {
+		for (const [original, preferred] of this.table) {
 			if (!targets.has(original)) continue;
 			let alias = preferred;
 			let suffix = 2;

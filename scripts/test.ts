@@ -13,6 +13,8 @@ const ISOLATED_ENVIRONMENT_KEYS = new Set([
 	"META_API_KEY",
 	"MODEL_API_KEY",
 	"META_MUSE_USER_AGENT",
+	// Changes request wire names, so a developer export must not reach tests.
+	"META_TOOL_ALIASES",
 ]);
 
 /** Build a child-only environment without credentials or the caller's Pi home. */

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `META_TOOL_ALIASES` adds or overrides tool-name aliases for direct Meta requests without a release, as comma-separated `name=alias` pairs (for example `grep=search_text`); `name=` turns a built-in alias off. Malformed entries are ignored. The hermetic test runner strips it.
 - Translate six more function tool names on direct Meta requests: `workflow`, `get_goal`, `read_file`, `write_file`, `edit_file`, and `search` (to `run_workflow`, `fetch_goal`, `read_file_content`, `write_file_content`, `edit_file_content`, and `search_content`). Each was verified live to trigger `client_attestation_denied` with a Muse subscription key while its alias is accepted. Agent harnesses that register tools under these names (for example Eve's workflow and goal tools on Pi) previously failed every Meta request even with `bash` aliased.
 
 ### Fixed

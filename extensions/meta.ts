@@ -13,6 +13,7 @@ export {
 	META_PROVIDER_ID,
 	MUSE_USER_AGENT,
 	MUSE_USER_AGENT_ENV_VAR,
+	TOOL_ALIASES_ENV_VAR,
 } from "../src/meta/constants.ts";
 export { refreshMetaModels } from "../src/meta/model-store.ts";
 export {
@@ -34,6 +35,7 @@ export {
 	META_ATTESTATION_DENIED_MESSAGE,
 	rewriteMetaAttestationError,
 } from "../src/meta/request-policy.ts";
+export { resolveToolAliases } from "../src/meta/tool-aliases.ts";
 export type { MetaProviderModel } from "../src/meta/types.ts";
 
 export default function metaOAuthProvider(pi: ExtensionAPI): void {
