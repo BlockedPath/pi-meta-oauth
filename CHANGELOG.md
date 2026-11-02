@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Translate six more function tool names on direct Meta requests: `workflow`, `get_goal`, `read_file`, `write_file`, `edit_file`, and `search` (to `run_workflow`, `fetch_goal`, `read_file_content`, `write_file_content`, `edit_file_content`, and `search_content`). Each was verified live to trigger `client_attestation_denied` with a Muse subscription key while its alias is accepted. Agent harnesses that register tools under these names (for example Eve's workflow and goal tools on Pi) previously failed every Meta request even with `bash` aliased.
+
 ### Fixed
 
 - Replace Meta's raw `client_attestation_denied` error on a subscription request with steps to switch to a pay-as-you-go key, on both Pi 0.83 and Pi 1.x error prefixes. Every direct Meta request now passes through the stream adapter, not only those with aliased tool names.

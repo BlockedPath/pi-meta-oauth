@@ -187,6 +187,35 @@ describe("Meta tool aliases over the Responses wire", () => {
 		expect(JSON.stringify(original)).toBe(snapshot);
 	});
 
+	test("aliases workflow, goal, and file tool names and restores them", async () => {
+		const originals = [
+			"workflow",
+			"get_goal",
+			"read_file",
+			"write_file",
+			"edit_file",
+			"search",
+		];
+		const aliases = [
+			"run_workflow",
+			"fetch_goal",
+			"read_file_content",
+			"write_file_content",
+			"edit_file_content",
+			"search_content",
+		];
+		const captured = request({
+			context: context(originals),
+			responseNames: aliases,
+		});
+		const result = await captured.stream.result();
+		expect(result.stopReason).toBe("toolUse");
+		expect(toolNames(result)).toEqual(originals);
+		expect(captured.payload()?.tools).toMatchObject(
+			aliases.map((name) => ({ name })),
+		);
+	});
+
 	test("replays restored calls and tool results using consistent wire names and IDs", async () => {
 		const original = context(["bash"]);
 		const first = request({
