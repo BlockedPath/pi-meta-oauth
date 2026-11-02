@@ -187,23 +187,18 @@ describe("Meta tool aliases over the Responses wire", () => {
 		expect(JSON.stringify(original)).toBe(snapshot);
 	});
 
+	const workflowAndFileAliases = [
+		["workflow", "run_workflow"],
+		["get_goal", "fetch_goal"],
+		["read_file", "read_file_content"],
+		["write_file", "write_file_content"],
+		["edit_file", "edit_file_content"],
+		["search", "search_content"],
+	] as const;
+
 	test("aliases workflow, goal, and file tool names and restores them", async () => {
-		const originals = [
-			"workflow",
-			"get_goal",
-			"read_file",
-			"write_file",
-			"edit_file",
-			"search",
-		];
-		const aliases = [
-			"run_workflow",
-			"fetch_goal",
-			"read_file_content",
-			"write_file_content",
-			"edit_file_content",
-			"search_content",
-		];
+		const originals = workflowAndFileAliases.map(([original]) => original);
+		const aliases = workflowAndFileAliases.map(([, alias]) => alias);
 		const captured = request({
 			context: context(originals),
 			responseNames: aliases,
@@ -214,6 +209,56 @@ describe("Meta tool aliases over the Responses wire", () => {
 		expect(captured.payload()?.tools).toMatchObject(
 			aliases.map((name) => ({ name })),
 		);
+	});
+
+	test("replays and forces workflow and file tools under their aliases", async () => {
+		for (const [original, alias] of workflowAndFileAliases) {
+			const replacement = {
+				model: model().id,
+				stream: true,
+				tools: [{ type: "function", name: original, description: original }],
+				input: [{ type: "function_call", name: original, arguments: "{}" }],
+				tool_choice: { type: "function", name: original },
+			};
+			const captured = request({
+				onPayload: async () => replacement,
+				responseNames: [alias],
+			});
+			expect(toolNames(await captured.stream.result())).toEqual([original]);
+			expect(captured.payload()).toMatchObject({
+				tools: [{ name: alias }],
+				input: [{ type: "function_call", name: alias }],
+				tool_choice: { type: "function", name: alias },
+			});
+			expect(replacement.tools[0]?.name).toBe(original);
+		}
+	});
+
+	test("suffixes workflow and file aliases that collide with custom tools", async () => {
+		const captured = request({
+			context: context([
+				"read_file",
+				"read_file_content",
+				"search",
+				"search_content",
+			]),
+			responseNames: [
+				"read_file_content_2",
+				"read_file_content",
+				"search_content_2",
+			],
+		});
+		expect(toolNames(await captured.stream.result())).toEqual([
+			"read_file",
+			"read_file_content",
+			"search",
+		]);
+		expect(captured.payload()?.tools).toMatchObject([
+			{ name: "read_file_content_2" },
+			{ name: "read_file_content" },
+			{ name: "search_content_2" },
+			{ name: "search_content" },
+		]);
 	});
 
 	test("replays restored calls and tool results using consistent wire names and IDs", async () => {
