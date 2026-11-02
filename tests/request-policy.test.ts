@@ -229,13 +229,14 @@ describe("Meta provider header policy", () => {
 });
 
 describe("Meta subscription attestation policy", () => {
-	test("replaces the raw 403 on every pi-ai error format, once", () => {
+	test("replaces any error quoting the attestation code, once", () => {
 		const body =
 			'{"code":"client_attestation_denied","message":"This API key is billed to a Muse Code subscription.","param":null,"type":"permission_error"}';
 		for (const raw of [
 			`meta API error (403): ${body}`,
 			`OpenAI API error (403): ${body}`,
 			`403 status code (no body) ${body}`,
+			`meta API error (500): ${body}`,
 		]) {
 			const message = { errorMessage: raw, stopReason: "error" };
 			expect(rewriteMetaAttestationError(message)).toBe(true);
@@ -247,6 +248,7 @@ describe("Meta subscription attestation policy", () => {
 				"Set META_API_KEY to a pay-as-you-go key",
 			);
 			expect(message.errorMessage).toContain("/logout");
+			expect(message.errorMessage).toContain("/model");
 			expect(message.errorMessage).not.toContain('"param":null');
 			// The guidance names the code, so a second pass must stand down.
 			expect(rewriteMetaAttestationError(message)).toBe(false);

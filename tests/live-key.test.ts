@@ -56,6 +56,19 @@ describe("live-probe credential resolution", () => {
 				META_API_KEY: " env-key ",
 			}),
 		).toBe("env-key");
+		expect(
+			resolveLiveMetaApiKey({
+				PI_CODING_AGENT_DIR: live,
+				PI_META_LIVE_API_KEY: " live-env-key ",
+				META_API_KEY: "env-key",
+			}),
+		).toBe("live-env-key");
+		expect(
+			resolveLiveMetaApiKey({
+				PI_CODING_AGENT_DIR: live,
+				MODEL_API_KEY: " model-env-key ",
+			}),
+		).toBe("model-env-key");
 
 		const expired = await agentDirWithAuth({
 			access: "expired-key",

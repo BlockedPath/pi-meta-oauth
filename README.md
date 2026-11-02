@@ -64,7 +64,9 @@ This addresses reported denials based on the tool list; Meta can still reject a
 request with `client_attestation_denied`.
 When that happens, Pi shows how to switch: set `META_API_KEY` to a
 pay-as-you-go key, run `/logout` to remove the stored Meta login (a stored login
-takes precedence over the environment), and restart Pi.
+takes precedence over the environment), and restart Pi. Wonder Full and the
+`-contributor` models are subscription-only, so also pick another model with
+`/model`.
 
 ## Models
 

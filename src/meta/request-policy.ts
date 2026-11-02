@@ -79,7 +79,7 @@ export function applyMetaModelHeaders(
  * a stored login over the environment, so switching keys requires both steps.
  */
 export const META_ATTESTATION_DENIED_MESSAGE =
-	"Meta rejected this Muse Code subscription request (client_attestation_denied). Tool-name aliases cannot guarantee acceptance. Set META_API_KEY to a pay-as-you-go key, run /logout and remove the stored Meta login (a stored login takes precedence over the environment), then restart Pi.";
+	"Meta rejected this Muse Code subscription request (client_attestation_denied). Tool-name aliases cannot guarantee acceptance. Set META_API_KEY to a pay-as-you-go key, run /logout and remove the stored Meta login (a stored login takes precedence over the environment), then restart Pi. Wonder Full and the -contributor models are subscription-only, so also select another model with /model.";
 
 /**
  * Replace an assistant message's attestation error with the guidance above.
