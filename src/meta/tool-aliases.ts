@@ -9,6 +9,12 @@ const TOOL_ALIASES = new Map([
 	["bash", "execute_command"],
 	["shell", "execute_shell"],
 	["web_search", "search_web"],
+	["workflow", "run_workflow"],
+	["get_goal", "fetch_goal"],
+	["read_file", "read_file_content"],
+	["write_file", "write_file_content"],
+	["edit_file", "edit_file_content"],
+	["search", "search_content"],
 ]);
 
 function namedTool(value: unknown): Record<string, unknown> | undefined {

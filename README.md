@@ -51,17 +51,24 @@ Prefer a static key instead? Set `META_API_KEY` (or `MODEL_API_KEY`) and skip
 For requests to `https://api.meta.ai/v1`, the extension translates these function
 tool names automatically:
 
-| Pi tool | Name sent to Meta |
+| Tool name | Name sent to Meta |
 | --- | --- |
 | `bash` | `execute_command` |
 | `shell` | `execute_shell` |
 | `web_search` | `search_web` |
+| `workflow` | `run_workflow` |
+| `get_goal` | `fetch_goal` |
+| `read_file` | `read_file_content` |
+| `write_file` | `write_file_content` |
+| `edit_file` | `edit_file_content` |
+| `search` | `search_content` |
 
 Pi receives the original names back for execution, streaming updates, and saved
 sessions. Replayed tool calls and explicit tool choices use the same aliases.
 If another tool already has an alias's name, a numeric suffix avoids a collision.
-This addresses reported denials based on the tool list; Meta can still reject a
-request with `client_attestation_denied`.
+Each listed name was verified live to trigger `client_attestation_denied` with a
+Muse subscription key while its alias was accepted. Meta can still reject a
+request whose tools are not listed here.
 When that happens, Pi shows how to switch: set `META_API_KEY` to a
 pay-as-you-go key, run `/logout` to remove the stored Meta login (a stored login
 takes precedence over the environment), and restart Pi. Wonder Full and the
