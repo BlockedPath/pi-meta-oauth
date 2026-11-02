@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-11-02
+
 ### Added
 
 - `META_TOOL_ALIASES` adds or overrides tool-name aliases for direct Meta requests without a release, as comma-separated `name=alias` pairs (for example `grep=search_text`); `name=` turns a built-in alias off. Malformed entries are ignored. The hermetic test runner strips it.
@@ -147,7 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pi entrypoints are unchanged: `extensions/meta.ts`, `extensions/media.ts`, `extensions/voice.ts`.
 - Document that the catalog cache is written during interactive/RPC startup and after `/login meta`. `pi --list-models meta` lists models but does not trigger a network catalog refresh.
 
-[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.6...HEAD
+[Unreleased]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.7...HEAD
+[0.7.7]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.6...v0.7.7
 [0.7.6]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.5...v0.7.6
 [0.7.5]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.4...v0.7.5
 [0.7.4]: https://github.com/BlockedPath/pi-meta-oauth/compare/v0.7.3...v0.7.4
