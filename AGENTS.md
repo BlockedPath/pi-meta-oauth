@@ -61,6 +61,9 @@ names in every stream event and final result without mutating the caller's tools
 or transcript. Preserve a live downstream partial without sharing upstream tool
 blocks, which can acquire new wire names between events. Cover collisions,
 concurrent requests, and multi-turn replay in `tests/tool-aliases.test.ts`.
+`META_TOOL_ALIASES` (`name=alias` pairs, `name=` disables) merges over the
+built-in table through `resolveToolAliases()`, read per request; the hermetic
+runner strips it so a developer export cannot change wire-name assertions.
 
 ## Muse User-Agent opt-in
 

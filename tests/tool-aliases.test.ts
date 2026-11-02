@@ -7,7 +7,9 @@ import type {
 	Tool,
 } from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
+import { TOOL_ALIASES_ENV_VAR } from "../src/meta/constants.ts";
 import { createMetaProviderConfig } from "../src/meta/provider.ts";
+import { resolveToolAliases } from "../src/meta/tool-aliases.ts";
 
 const config = createMetaProviderConfig();
 const send = config.streamSimple;
@@ -372,5 +374,73 @@ describe("Meta tool aliases over the Responses wire", () => {
 			expect(toolNames(await captured.stream.result())).toEqual(["bash"]);
 			expect(captured.payload()?.tools).toMatchObject([{ name: "bash" }]);
 		}
+	});
+});
+
+describe("META_TOOL_ALIASES", () => {
+	test("adds, overrides, and disables aliases and ignores malformed entries", () => {
+		const aliases = resolveToolAliases({
+			[TOOL_ALIASES_ENV_VAR]:
+				" grep = search_text ,bash=run_command,shell=,web_search=web_search,no-separator,bad name=x,list_files=bad alias,grep=find_text",
+		});
+		expect(aliases.get("grep")).toBe("find_text");
+		expect(aliases.get("bash")).toBe("run_command");
+		expect(aliases.has("shell")).toBe(false);
+		expect(aliases.has("web_search")).toBe(false);
+		expect(aliases.has("list_files")).toBe(false);
+		expect(aliases.has("bad name")).toBe(false);
+		expect(aliases.get("read_file")).toBe("read_file_content");
+		expect(resolveToolAliases({ [TOOL_ALIASES_ENV_VAR]: "  " })).toBe(
+			resolveToolAliases({}),
+		);
+	});
+
+	test("keeps a suffixed 64-character alias within the name limit", async () => {
+		const long = "a".repeat(64);
+		const previous = process.env[TOOL_ALIASES_ENV_VAR];
+		process.env[TOOL_ALIASES_ENV_VAR] = `grep=${long}`;
+		try {
+			const expected = `${"a".repeat(62)}_2`;
+			const captured = request({
+				context: context(["grep", long]),
+				responseNames: [expected],
+			});
+			expect(toolNames(await captured.stream.result())).toEqual(["grep"]);
+			expect(captured.payload()?.tools).toMatchObject([
+				{ name: expected },
+				{ name: long },
+			]);
+		} finally {
+			if (previous === undefined) delete process.env[TOOL_ALIASES_ENV_VAR];
+			else process.env[TOOL_ALIASES_ENV_VAR] = previous;
+		}
+	});
+
+	test("applies the environment per request and restores custom names", async () => {
+		const previous = process.env[TOOL_ALIASES_ENV_VAR];
+		process.env[TOOL_ALIASES_ENV_VAR] = "grep=search_text,bash=";
+		try {
+			const captured = request({
+				context: context(["grep", "bash"]),
+				responseNames: ["search_text", "bash"],
+			});
+			expect(toolNames(await captured.stream.result())).toEqual([
+				"grep",
+				"bash",
+			]);
+			expect(captured.payload()?.tools).toMatchObject([
+				{ name: "search_text" },
+				{ name: "bash" },
+			]);
+		} finally {
+			if (previous === undefined) delete process.env[TOOL_ALIASES_ENV_VAR];
+			else process.env[TOOL_ALIASES_ENV_VAR] = previous;
+		}
+		const builtIn = request({ context: context(["grep", "bash"]) });
+		await builtIn.stream.result();
+		expect(builtIn.payload()?.tools).toMatchObject([
+			{ name: "grep" },
+			{ name: "execute_command" },
+		]);
 	});
 });

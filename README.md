@@ -69,7 +69,21 @@ If another tool already has an alias's name, a numeric suffix avoids a collision
 Each listed name was verified live to trigger `client_attestation_denied` with a
 Muse subscription key while its alias was accepted. Meta can still reject a
 request whose tools are not listed here.
-When that happens, Pi shows how to switch: set `META_API_KEY` to a
+
+To alias another blocked name without waiting for a release, set
+`META_TOOL_ALIASES` to comma-separated `name=alias` pairs in the environment Pi
+starts from, then restart Pi:
+
+```sh
+export META_TOOL_ALIASES='grep=search_text,list_files=list_directory'
+```
+
+An entry overrides a built-in alias for the same name, and `name=` turns a
+built-in alias off (for example `search=`). Names must use letters, digits, `_`,
+or `-` (at most 64 characters); malformed entries are ignored.
+
+If Meta still rejects a request with `client_attestation_denied`, Pi shows how
+to switch: set `META_API_KEY` to a
 pay-as-you-go key, run `/logout` to remove the stored Meta login (a stored login
 takes precedence over the environment), and restart Pi. Wonder Full and the
 `-contributor` models are subscription-only, so also pick another model with

@@ -12,6 +12,7 @@ const credentialKeys = [
 	"META_API_KEY",
 	"MODEL_API_KEY",
 	"META_MUSE_USER_AGENT",
+	"META_TOOL_ALIASES",
 ];
 
 async function runFixture(
@@ -73,6 +74,7 @@ describe("hermetic test launcher", () => {
 			MODEL_API_KEY: "caller-key",
 			PI_META_LIVE_API_KEY: "caller-key",
 			META_MUSE_USER_AGENT: "1",
+			META_TOOL_ALIASES: "grep=search_text",
 		};
 		const original = { ...inherited };
 		expect(createHermeticTestEnvironment(inherited, "test-home")).toEqual({

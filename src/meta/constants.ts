@@ -25,4 +25,9 @@ export const MUSE_USER_AGENT =
 	"muse-build/1.3.0 (non-interactive; linux-x86_64; build ac7280f2aca67769d1455a8847bb502b617d50f6)";
 /** Set to `1`, `true`, or `yes` to enable the Muse fingerprint. */
 export const MUSE_USER_AGENT_ENV_VAR = "META_MUSE_USER_AGENT";
+/**
+ * Extra or overriding tool-name aliases for direct Meta requests, as
+ * comma-separated `name=alias` pairs; `name=` turns off a built-in alias.
+ */
+export const TOOL_ALIASES_ENV_VAR = "META_TOOL_ALIASES";
 export const META_PROMPT_CACHE_RETENTION = "24h";
