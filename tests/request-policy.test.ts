@@ -14,6 +14,8 @@ import {
 	applyMetaResponsesCacheHints,
 	applyMetaUserAgentFingerprint,
 	isDirectMetaModelApiUrl,
+	META_ATTESTATION_DENIED_MESSAGE,
+	rewriteMetaAttestationError,
 } from "../src/meta/request-policy.ts";
 import type { MetaEnv, MetaProviderModel } from "../src/meta/types.ts";
 import { withMuseUserAgent } from "./muse-env.ts";
@@ -223,6 +225,60 @@ describe("Meta provider header policy", () => {
 			);
 			expect(headers).toEqual({ "User-Agent": MUSE_USER_AGENT });
 		});
+	});
+});
+
+describe("Meta subscription attestation policy", () => {
+	test("replaces any error quoting the attestation code, once", () => {
+		const body =
+			'{"code":"client_attestation_denied","message":"This API key is billed to a Muse Code subscription.","param":null,"type":"permission_error"}';
+		for (const raw of [
+			`meta API error (403): ${body}`,
+			`OpenAI API error (403): ${body}`,
+			`403 status code (no body) ${body}`,
+			`meta API error (500): ${body}`,
+		]) {
+			const message = { errorMessage: raw, stopReason: "error" };
+			expect(rewriteMetaAttestationError(message)).toBe(true);
+			expect(message).toEqual({
+				errorMessage: META_ATTESTATION_DENIED_MESSAGE,
+				stopReason: "error",
+			});
+			expect(message.errorMessage).toContain(
+				"Set META_API_KEY to a pay-as-you-go key",
+			);
+			expect(message.errorMessage).toContain("/logout");
+			expect(message.errorMessage).toContain("/model");
+			expect(message.errorMessage).not.toContain('"param":null');
+			// The guidance names the code, so a second pass must stand down.
+			expect(rewriteMetaAttestationError(message)).toBe(false);
+			expect(message.errorMessage).toBe(META_ATTESTATION_DENIED_MESSAGE);
+		}
+	});
+
+	test("leaves other errors and malformed messages untouched", () => {
+		for (const message of [
+			{ errorMessage: 'meta API error (403): {"code":"forbidden"}' },
+			{ errorMessage: "meta API error (401): unauthorized" },
+			{ errorMessage: "client attestation denied" },
+			{ errorMessage: "" },
+			{ errorMessage: 403 },
+			{ stopReason: "error" },
+			{},
+		]) {
+			const before = { ...message };
+			expect(rewriteMetaAttestationError(message)).toBe(false);
+			expect(message).toEqual(before);
+		}
+		for (const message of [
+			undefined,
+			null,
+			[],
+			"client_attestation_denied",
+			42,
+		]) {
+			expect(rewriteMetaAttestationError(message)).toBe(false);
+		}
 	});
 });
 

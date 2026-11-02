@@ -50,7 +50,7 @@ Hermetic OAuth and catalog tests live in `tests/meta.test.ts`. Failure-path and 
 
 Muse Spark on `api.meta.ai` returns no useful cache hits on `/v1/chat/completions`. Keep the provider on `/v1/responses` and preserve `applyMetaResponsesCacheHints()` in the provider's request-local `streamSimple` adapter, after the caller's payload callback. It sets `prompt_cache_retention: "24h"` only when the payload has no explicit retention and removes `reasoning` when effort is `"none"` or missing because Meta rejects that shape. Do not use session-scoped request hooks for these adjustments: `ctx.model` can change while a request is in flight.
 
-`tests/meta-cache.test.ts` contains hermetic wire-contract coverage plus an optional live cache probe. The live probe resolves a key from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired `meta.access` entry in `~/.pi/agent/auth.json`. It makes real billable requests whenever a credential resolves; do not put a live key in CI.
+`tests/meta-cache.test.ts` contains hermetic wire-contract coverage plus an optional live cache probe. The live probe resolves a key from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired `meta.access` entry in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`). It makes real billable requests whenever a credential resolves; do not put a live key in CI.
 
 ## Tool name aliases
 
@@ -72,4 +72,4 @@ Since at least 2026-10-23, `GET https://api.meta.ai/v1/models` returns bare `{id
 
 The catalog also lists non-token models that Meta bills per generated image (`muse-image-*`), per hour of audio (`muse-voice-*`), or per video frame (`sam-*`). `isNonChatModelId()` filters those families by prefix in both `toProviderModels()` and `restoreProviderModels()`, so a new version stays hidden without a code change and an entry cached by an earlier release disappears on restore. Keep the filter prefix-based. On restore, bundled IDs take name, cost, and input from `FALLBACK_DEFINITIONS` (a cached copy is an older release's bundled value or its default) and keep cached limits, effort names, headers, and compat; unknown IDs restore every cached field.
 
-Every live probe must resolve its key through `tests/live-key.ts` (env, then an unexpired `meta.access` in `~/.pi/agent/auth.json`) so a plain `bun run test:live` runs all of them; the catalog canary in `tests/meta.test.ts` fails when a live ID has neither a bundled definition nor a non-chat prefix.
+Every live probe must resolve its key through `tests/live-key.ts` (env, then an unexpired `meta.access` in Pi's agent-dir `auth.json`) so a plain `bun run test:live` runs all of them; the catalog canary in `tests/meta.test.ts` fails when a live ID has neither a bundled definition nor a non-chat prefix.

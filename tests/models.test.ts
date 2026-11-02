@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { META_API_BASE_URL, META_PROVIDER_ID } from "../src/meta/constants.ts";
+import {
+	META_API_BASE_URL,
+	META_PROVIDER_ID,
+	MUSE_USER_AGENT,
+} from "../src/meta/constants.ts";
 import {
 	fallbackModels,
 	isNonChatModelId,
@@ -271,6 +275,30 @@ describe("Meta cached model decoding", () => {
 		expect(models.map(({ id, baseUrl }) => [id, baseUrl])).toEqual([
 			["muse-spark-1.3", META_API_BASE_URL],
 			["muse-spark-1.2", META_API_BASE_URL],
+		]);
+	});
+
+	test("drops cached User-Agent headers so the Muse fingerprint stays opt-in", () => {
+		const valid = {
+			...requiredModel(fallbackModels()),
+			provider: META_PROVIDER_ID,
+			api: "openai-responses",
+		};
+		const models = restoreProviderModels([
+			{
+				...valid,
+				id: "muse-spark-1.3-contributor",
+				headers: { "User-Agent": MUSE_USER_AGENT, "X-Cached": "yes" },
+			},
+			{
+				...valid,
+				id: "muse-wonder-1.0-contributor",
+				headers: { "user-agent": MUSE_USER_AGENT },
+			},
+		]);
+		expect(models.map(({ id, headers }) => [id, headers])).toEqual([
+			["muse-spark-1.3-contributor", { "X-Cached": "yes" }],
+			["muse-wonder-1.0-contributor", undefined],
 		]);
 	});
 

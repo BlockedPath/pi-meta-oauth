@@ -17,6 +17,7 @@ import {
 	applyMetaModelHeaders,
 	applyMetaResponsesCacheHints,
 	isDirectMetaModelApiUrl,
+	rewriteMetaAttestationError,
 } from "./request-policy.ts";
 import { MetaToolAliases } from "./tool-aliases.ts";
 import type { MetaProviderConfig } from "./types.ts";
@@ -26,23 +27,25 @@ const { streamSimple } = openAIResponsesApi();
 type MetaStream = ReturnType<typeof streamSimple>;
 
 /**
- * Restore Pi tool names on the response stream.
+ * Restore Pi tool names and explain subscription attestation failures.
  * The loop drains upstream itself, so consumers that only await `result()`
  * still get the final message.
  */
 function forwardMetaStream(
 	send: () => MetaStream,
 	model: { id: string; provider: string },
-	aliases: MetaToolAliases,
+	aliases?: MetaToolAliases,
 ): MetaStream {
 	const downstream = createAssistantMessageEventStream();
 	void (async () => {
 		let partial: AssistantMessage | undefined;
 		try {
 			for await (const upstreamEvent of send()) {
-				const event = aliases.restoreEvent(upstreamEvent);
-				if (event.type !== "error" && event.type !== "done")
-					partial = event.partial;
+				const event = aliases?.restoreEvent(upstreamEvent) ?? upstreamEvent;
+				if (event.type === "error") rewriteMetaAttestationError(event.error);
+				else if (event.type === "done")
+					rewriteMetaAttestationError(event.message);
+				else partial = event.partial;
 				downstream.push(event);
 			}
 		} catch (error) {
@@ -68,6 +71,7 @@ function forwardMetaStream(
 			message.stopReason = "error";
 			message.errorMessage =
 				error instanceof Error ? error.message : String(error);
+			rewriteMetaAttestationError(message);
 			downstream.push({ type: "error", reason: "error", error: message });
 		} finally {
 			downstream.end();
@@ -106,7 +110,7 @@ export function createMetaProviderConfig(): MetaProviderConfig {
 						return aliases ? aliases.rewritePayload(hinted) : hinted;
 					},
 				});
-			return aliases ? forwardMetaStream(send, requestModel, aliases) : send();
+			return isMeta ? forwardMetaStream(send, requestModel, aliases) : send();
 		},
 		models: fallbackModels(),
 		refreshModels: refreshMetaModels,

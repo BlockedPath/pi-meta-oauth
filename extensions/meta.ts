@@ -31,6 +31,8 @@ export {
 	applyMetaResponsesCacheHints,
 	applyMetaUserAgentFingerprint,
 	isDirectMetaModelApiUrl,
+	META_ATTESTATION_DENIED_MESSAGE,
+	rewriteMetaAttestationError,
 } from "../src/meta/request-policy.ts";
 export type { MetaProviderModel } from "../src/meta/types.ts";
 

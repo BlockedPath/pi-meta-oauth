@@ -62,6 +62,11 @@ sessions. Replayed tool calls and explicit tool choices use the same aliases.
 If another tool already has an alias's name, a numeric suffix avoids a collision.
 This addresses reported denials based on the tool list; Meta can still reject a
 request with `client_attestation_denied`.
+When that happens, Pi shows how to switch: set `META_API_KEY` to a
+pay-as-you-go key, run `/logout` to remove the stored Meta login (a stored login
+takes precedence over the environment), and restart Pi. Wonder Full and the
+`-contributor` models are subscription-only, so also pick another model with
+`/model`.
 
 ## Models
 
@@ -161,8 +166,8 @@ the header directly, independently of `META_MUSE_USER_AGENT`. The catalog probe
 makes one catalog request and fails when a live model ID has neither a bundled
 definition nor a non-chat prefix. All three probes resolve credentials from
 `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired minted
-key in `~/.pi/agent/auth.json`, in that order, and skip when no usable
-credential exists.
+key in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`), in that
+order, and skip when no usable credential exists.
 
 ```bash
 bun run test:live tests/meta-cache.test.ts

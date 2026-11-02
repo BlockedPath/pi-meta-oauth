@@ -40,6 +40,7 @@ async function runFixture(
 					...process.env,
 					HOME: fixtureHome,
 					USERPROFILE: fixtureHome,
+					PI_CODING_AGENT_DIR: dirname(authFile),
 					...Object.fromEntries(
 						credentialKeys.map((key) => [key, "fixture-key"]),
 					),
@@ -67,6 +68,7 @@ describe("hermetic test launcher", () => {
 			UserProfile: "caller-profile",
 			HOMEDRIVE: "C:",
 			HOMEPATH: "caller-path",
+			PI_CODING_AGENT_DIR: "caller-agent",
 			meta_api_key: "caller-key",
 			MODEL_API_KEY: "caller-key",
 			PI_META_LIVE_API_KEY: "caller-key",
@@ -88,6 +90,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 test("selected", () => {
 	for (const key of ${JSON.stringify(credentialKeys)}) expect(process.env[key]).toBeUndefined();
+	expect(process.env.PI_CODING_AGENT_DIR).toBeUndefined();
 	expect(homedir()).toBe(process.env.HOME);
 	expect(homedir()).toBe(process.env.USERPROFILE);
 	expect(readdirSync(homedir())).toEqual([]);
