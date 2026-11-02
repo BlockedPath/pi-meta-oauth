@@ -395,6 +395,27 @@ describe("META_TOOL_ALIASES", () => {
 		);
 	});
 
+	test("keeps a suffixed 64-character alias within the name limit", async () => {
+		const long = "a".repeat(64);
+		const previous = process.env[TOOL_ALIASES_ENV_VAR];
+		process.env[TOOL_ALIASES_ENV_VAR] = `grep=${long}`;
+		try {
+			const expected = `${"a".repeat(62)}_2`;
+			const captured = request({
+				context: context(["grep", long]),
+				responseNames: [expected],
+			});
+			expect(toolNames(await captured.stream.result())).toEqual(["grep"]);
+			expect(captured.payload()?.tools).toMatchObject([
+				{ name: expected },
+				{ name: long },
+			]);
+		} finally {
+			if (previous === undefined) delete process.env[TOOL_ALIASES_ENV_VAR];
+			else process.env[TOOL_ALIASES_ENV_VAR] = previous;
+		}
+	});
+
 	test("applies the environment per request and restores custom names", async () => {
 		const previous = process.env[TOOL_ALIASES_ENV_VAR];
 		process.env[TOOL_ALIASES_ENV_VAR] = "grep=search_text,bash=";

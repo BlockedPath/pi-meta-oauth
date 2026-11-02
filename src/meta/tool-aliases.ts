@@ -20,7 +20,10 @@ const BUILT_IN_TOOL_ALIASES: ReadonlyMap<string, string> = new Map([
 ]);
 
 /** The Responses API's function-name charset and length limit. */
-const FUNCTION_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_FUNCTION_NAME_LENGTH = 64;
+const FUNCTION_NAME = new RegExp(
+	`^[A-Za-z0-9_-]{1,${MAX_FUNCTION_NAME_LENGTH}}$`,
+);
 
 /**
  * Built-in aliases merged with `META_TOOL_ALIASES`. Entries are `name=alias`,
@@ -89,7 +92,11 @@ export class MetaToolAliases {
 			if (!targets.has(original)) continue;
 			let alias = preferred;
 			let suffix = 2;
-			while (occupied.has(alias)) alias = `${preferred}_${suffix++}`;
+			while (occupied.has(alias)) {
+				// Trim the base so a suffixed name stays within the 64-character limit.
+				const tail = `_${suffix++}`;
+				alias = `${preferred.slice(0, MAX_FUNCTION_NAME_LENGTH - tail.length)}${tail}`;
+			}
 			occupied.add(alias);
 			aliases.set(original, alias);
 			this.originalNames.set(alias, original);

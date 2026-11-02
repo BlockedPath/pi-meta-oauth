@@ -81,7 +81,9 @@ export META_TOOL_ALIASES='grep=search_text,list_files=list_directory'
 An entry overrides a built-in alias for the same name, and `name=` turns a
 built-in alias off (for example `search=`). Names must use letters, digits, `_`,
 or `-` (at most 64 characters); malformed entries are ignored.
-When that happens, Pi shows how to switch: set `META_API_KEY` to a
+
+If Meta still rejects a request with `client_attestation_denied`, Pi shows how
+to switch: set `META_API_KEY` to a
 pay-as-you-go key, run `/logout` to remove the stored Meta login (a stored login
 takes precedence over the environment), and restart Pi. Wonder Full and the
 `-contributor` models are subscription-only, so also pick another model with
