@@ -7,6 +7,8 @@ const ISOLATED_ENVIRONMENT_KEYS = new Set([
 	"USERPROFILE",
 	"HOMEDRIVE",
 	"HOMEPATH",
+	// Pi's agent directory holds auth.json, so it can resolve a live credential.
+	"PI_CODING_AGENT_DIR",
 	"PI_META_LIVE_API_KEY",
 	"META_API_KEY",
 	"MODEL_API_KEY",

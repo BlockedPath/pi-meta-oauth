@@ -1,6 +1,25 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Pi's agent directory: `PI_CODING_AGENT_DIR`, expanded the way Pi expands it
+ * (`~`, `~/…`, and `file://` URLs), else `~/.pi/agent`.
+ */
+export function piAgentDir(env: NodeJS.ProcessEnv = process.env): string {
+	const configured = env.PI_CODING_AGENT_DIR;
+	if (!configured) return join(homedir(), ".pi", "agent");
+	if (configured === "~") return homedir();
+	if (
+		configured.startsWith("~/") ||
+		(process.platform === "win32" && configured.startsWith("~\\"))
+	) {
+		return join(homedir(), configured.slice(2));
+	}
+	if (configured.startsWith("file://")) return fileURLToPath(configured);
+	return configured;
+}
 
 /**
  * Resolve the credential for the billable live probes: an explicit env key,
@@ -8,17 +27,19 @@ import { join } from "node:path";
  * live test must use this, so a plain `bun run test:live` exercises all of
  * them; a probe keyed on one env var alone silently skips.
  */
-export function resolveLiveMetaApiKey(): string | undefined {
+export function resolveLiveMetaApiKey(
+	env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
 	for (const value of [
-		process.env.PI_META_LIVE_API_KEY,
-		process.env.META_API_KEY,
-		process.env.MODEL_API_KEY,
+		env.PI_META_LIVE_API_KEY,
+		env.META_API_KEY,
+		env.MODEL_API_KEY,
 	]) {
 		if (typeof value === "string" && value.trim()) return value.trim();
 	}
 	try {
 		const auth = JSON.parse(
-			readFileSync(join(homedir(), ".pi/agent/auth.json"), "utf8"),
+			readFileSync(join(piAgentDir(env), "auth.json"), "utf8"),
 		) as { meta?: { access?: unknown; expires?: unknown } };
 		// auth.meta.expires is epoch milliseconds; an expired token must not turn
 		// every test run into a hard 401 — treat it as no credential.

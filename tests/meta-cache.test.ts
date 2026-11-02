@@ -110,6 +110,99 @@ async function captureResponsesRequest(options?: {
 	return { url, payload, headers };
 }
 
+/** Meta's 403 for a Muse Code subscription key used outside Muse Code (observed 2026-11-01). */
+const ATTESTATION_BODY = {
+	error: {
+		code: "client_attestation_denied",
+		message:
+			"This API key is billed to a Muse Code subscription. Muse Code subscriptions cover requests from the Muse Code client only. Use it in Muse Code, or use a pay-as-you-go API key for other clients.",
+		param: null,
+		type: "permission_error",
+	},
+};
+
+const SUCCESS_SSE_ITEM = {
+	type: "message",
+	id: "msg_1",
+	status: "completed",
+	role: "assistant",
+	content: [
+		{ type: "output_text", text: "META_OK", annotations: [], logprobs: [] },
+	],
+};
+const SUCCESS_SSE_BODY = [
+	{ type: "response.created", response: { id: "resp_1" } },
+	{
+		type: "response.output_item.added",
+		output_index: 0,
+		item: { type: "message", id: "msg_1", role: "assistant", content: [] },
+	},
+	{
+		type: "response.output_text.delta",
+		output_index: 0,
+		item_id: "msg_1",
+		content_index: 0,
+		delta: "META_OK",
+	},
+	{
+		type: "response.output_item.done",
+		output_index: 0,
+		item: SUCCESS_SSE_ITEM,
+	},
+	{
+		type: "response.completed",
+		response: {
+			id: "resp_1",
+			object: "response",
+			created_at: 0,
+			status: "completed",
+			model: "muse-spark-1.2-contributor",
+			output: [SUCCESS_SSE_ITEM],
+			usage: {
+				input_tokens: 3,
+				output_tokens: 2,
+				total_tokens: 5,
+				input_tokens_details: { cached_tokens: 0 },
+				output_tokens_details: { reasoning_tokens: 0 },
+			},
+		},
+	},
+]
+	.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+	.join("")
+	.concat("data: [DONE]\n\n");
+
+async function captureStreamFailure(options: {
+	status: number;
+	body: unknown;
+	model?: Model<"openai-responses">;
+}) {
+	const send = createMetaProviderConfig().streamSimple;
+	if (!send) throw new Error("Expected Meta stream adapter");
+	const stream = send(
+		options.model ?? museModel(),
+		toStreamContext({
+			messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
+		}),
+		{
+			apiKey: "test-key",
+			fetch: (async () =>
+				new Response(JSON.stringify(options.body), {
+					status: options.status,
+					headers: { "Content-Type": "application/json" },
+				})) as unknown as typeof fetch,
+		},
+	);
+	const events: Array<{
+		type: string;
+		error?: { errorMessage?: string; stopReason?: string };
+	}> = [];
+	for await (const event of stream) {
+		events.push(event as (typeof events)[number]);
+	}
+	return { events, finalMessage: await stream.result() };
+}
+
 describe("Meta Responses cache and reasoning contracts", () => {
 	test("routes Muse through openai-responses on api.meta.ai", () => {
 		const config = createMetaProviderConfig();
@@ -293,6 +386,105 @@ describe("Meta Responses cache and reasoning contracts", () => {
 			input: "Replacement prompt",
 			prompt_cache_retention: "in-memory",
 		});
+	});
+});
+
+describe("Meta subscription attestation failures", () => {
+	test("replaces the raw client_attestation_denied 403 with pay-as-you-go guidance", async () => {
+		const { events, finalMessage } = await captureStreamFailure({
+			status: 403,
+			body: ATTESTATION_BODY,
+		});
+		const terminal = events.at(-1);
+		expect(terminal?.type).toBe("error");
+		expect(terminal?.error?.stopReason).toBe("error");
+		expect(terminal?.error?.errorMessage).toContain(
+			"Set META_API_KEY to a pay-as-you-go key",
+		);
+		expect(terminal?.error?.errorMessage).not.toContain('"param":null');
+		expect(finalMessage.errorMessage).toBe(terminal?.error?.errorMessage);
+		expect(finalMessage.stopReason).toBe("error");
+	});
+
+	test("leaves other provider failures untouched", async () => {
+		const { finalMessage } = await captureStreamFailure({
+			status: 403,
+			body: {
+				error: {
+					code: "forbidden",
+					message: "not allowed",
+					type: "permission_error",
+				},
+			},
+		});
+		expect(finalMessage.errorMessage).toContain("forbidden");
+		expect(finalMessage.errorMessage).not.toContain("Set META_API_KEY");
+	});
+
+	test("does not rewrite errors for another provider's model", async () => {
+		const { finalMessage } = await captureStreamFailure({
+			status: 403,
+			body: ATTESTATION_BODY,
+			model: { ...museModel(), provider: "openai" },
+		});
+		expect(finalMessage.errorMessage).toContain("client_attestation_denied");
+		expect(finalMessage.errorMessage).not.toContain("Set META_API_KEY");
+	});
+
+	test("forwards a successful Responses stream unchanged", async () => {
+		const send = createMetaProviderConfig().streamSimple;
+		if (!send) throw new Error("Expected Meta stream adapter");
+		const stream = send(
+			museModel(),
+			toStreamContext({
+				messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
+			}),
+			{
+				apiKey: "test-key",
+				fetch: (async () =>
+					new Response(SUCCESS_SSE_BODY, {
+						status: 200,
+						headers: { "Content-Type": "text/event-stream" },
+					})) as unknown as typeof fetch,
+			},
+		);
+		const types: string[] = [];
+		for await (const event of stream) types.push(event.type);
+		const finalMessage = await stream.result();
+		expect(types).toEqual([
+			"start",
+			"text_start",
+			"text_delta",
+			"text_end",
+			"done",
+		]);
+		expect(finalMessage.stopReason).toBe("stop");
+		expect(finalMessage.content).toEqual([
+			expect.objectContaining({ type: "text", text: "META_OK" }),
+		]);
+		expect(finalMessage.errorMessage).toBeUndefined();
+	});
+
+	test("still surfaces a missing-key setup failure as an error event", async () => {
+		const send = createMetaProviderConfig().streamSimple;
+		if (!send) throw new Error("Expected Meta stream adapter");
+		const stream = send(
+			museModel(),
+			toStreamContext({
+				messages: [{ role: "user", content: "Hi", timestamp: Date.now() }],
+			}),
+			{
+				fetch: (async () =>
+					new Response("unreachable")) as unknown as typeof fetch,
+			},
+		);
+		// result()-only consumption: the adapter must drain upstream itself.
+		const finalMessage = await stream.result();
+		expect(finalMessage.stopReason).toBe("error");
+		expect(finalMessage.errorMessage).toContain(
+			"No API key for provider: meta",
+		);
+		expect(finalMessage.errorMessage).not.toContain("Set META_API_KEY");
 	});
 });
 

@@ -323,12 +323,18 @@ function storedCompat(value: unknown): MetaResponsesCompat {
 	return compat;
 }
 
+/**
+ * Drop a cached User-Agent: Pi sends model headers on every request, so one
+ * would bypass the Muse fingerprint opt-in, and the stream adapter would then
+ * treat it as explicit and stand aside. The fingerprint is applied per request.
+ */
 function storedHeaders(value: unknown): Record<string, string> | undefined {
 	const entries = asRecord(value);
 	if (!entries) return undefined;
 	const headers = Object.fromEntries(
 		Object.entries(entries).filter(
-			(entry): entry is [string, string] => typeof entry[1] === "string",
+			(entry): entry is [string, string] =>
+				typeof entry[1] === "string" && entry[0].toLowerCase() !== "user-agent",
 		),
 	);
 	return Object.keys(headers).length ? headers : undefined;

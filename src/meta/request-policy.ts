@@ -74,6 +74,32 @@ export function applyMetaModelHeaders(
 	return applyMetaUserAgentFingerprint(headers, requestModel.baseUrl);
 }
 
+/**
+ * Fallback guidance when Meta still rejects a subscription request. Pi prefers
+ * a stored login over the environment, so switching keys requires both steps.
+ */
+export const META_ATTESTATION_DENIED_MESSAGE =
+	"Meta rejected this Muse Code subscription request (client_attestation_denied). Tool-name aliases cannot guarantee acceptance. Set META_API_KEY to a pay-as-you-go key, run /logout and remove the stored Meta login (a stored login takes precedence over the environment), then restart Pi.";
+
+/**
+ * Replace an assistant message's attestation error with the guidance above.
+ * pi-ai's prefix differs by version (`meta API error (403): …` on Pi 1.x,
+ * `OpenAI API error (403): …` on Pi 0.83), so the error code is the match.
+ */
+export function rewriteMetaAttestationError(message: unknown): boolean {
+	const record = asRecord(message);
+	if (
+		!record ||
+		typeof record.errorMessage !== "string" ||
+		record.errorMessage === META_ATTESTATION_DENIED_MESSAGE ||
+		!record.errorMessage.includes("client_attestation_denied")
+	) {
+		return false;
+	}
+	record.errorMessage = META_ATTESTATION_DENIED_MESSAGE;
+	return true;
+}
+
 /** Set the Responses cache default and remove unsupported empty/none reasoning. */
 export function applyMetaResponsesCacheHints(
 	payload: unknown,

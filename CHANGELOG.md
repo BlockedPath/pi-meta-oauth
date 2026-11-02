@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Replace Meta's raw `client_attestation_denied` error on a subscription request with steps to switch to a pay-as-you-go key, on both Pi 0.83 and Pi 1.x error prefixes. Every direct Meta request now passes through the stream adapter, not only those with aliased tool names.
+- Drop a `User-Agent` header from cached model entries on restore. Pi sends model headers on every request, so a cached one (only possible from a hand-edited or foreign `models-store.json`) would have sent the Muse fingerprint without `META_MUSE_USER_AGENT` and made the opt-in stand aside.
+- Live probes now read the minted key from Pi's agent directory, honoring `PI_CODING_AGENT_DIR`, instead of always `~/.pi/agent`, so `bun run test:live` no longer skips them silently for a custom agent directory. The hermetic test runner now also strips `PI_CODING_AGENT_DIR`, so `bun run test` cannot pick up a live credential through it.
+
 ## [0.7.6] - 2026-11-01
 
 ### Added
