@@ -15,11 +15,10 @@ import {
 import {
 	asRecord,
 	delay,
-	errorDetail,
 	postForm,
 	RequestTimeoutError,
-	responseBody,
-	withRequestTimeout,
+	requestFailure,
+	requestJson,
 } from "./http.ts";
 import type { Fetch, Sleep } from "./types.ts";
 
@@ -72,11 +71,6 @@ function trustedHttpUrl(value: unknown): string | undefined {
 	} catch {
 		return undefined;
 	}
-}
-
-function failure(message: string, body: Record<string, unknown>): Error {
-	const detail = errorDetail(body);
-	return new Error(`${message}${detail ? `: ${detail}` : ""}`);
 }
 
 /** Say which request timed out; every other failure passes through. */
@@ -148,7 +142,7 @@ async function requestDeviceAuthorization(
 	).catch(timeoutAs("Meta login request timed out"));
 	checkLoginCancellation(signal);
 	if (!response.ok) {
-		throw failure(
+		throw requestFailure(
 			`Meta login could not be started (HTTP ${response.status})`,
 			body,
 		);
@@ -245,7 +239,10 @@ async function pollIdentityToken(
 			case "expired_token":
 				throw new Error("Meta login request expired");
 			default:
-				throw failure(`Meta login failed (HTTP ${response.status})`, body);
+				throw requestFailure(
+					`Meta login failed (HTTP ${response.status})`,
+					body,
+				);
 		}
 	}
 	throw new Error("Meta login request expired");
@@ -258,23 +255,21 @@ export async function mintMetaApiKey(
 	timeoutMs = META_REQUEST_TIMEOUT_MS,
 ): Promise<string> {
 	signal?.throwIfAborted();
-	const { response, body } = await withRequestTimeout(
+	const { response, body } = await requestJson(
+		API_KEY_MINT_URL,
+		{
+			method: "POST",
+			headers: {
+				Accept: "application/json",
+				Authorization: `Bearer ${identityToken}`,
+				"Content-Type": "application/json",
+				"x-api-version": META_API_VERSION,
+			},
+			body: "{}",
+		},
+		fetchImpl,
 		signal,
 		timeoutMs,
-		async (requestSignal) => {
-			const response = await fetchImpl(API_KEY_MINT_URL, {
-				method: "POST",
-				headers: {
-					Accept: "application/json",
-					Authorization: `Bearer ${identityToken}`,
-					"Content-Type": "application/json",
-					"x-api-version": META_API_VERSION,
-				},
-				body: "{}",
-				signal: requestSignal,
-			});
-			return { response, body: await responseBody(response) };
-		},
 	).catch(timeoutAs("Meta API-key mint timed out"));
 	signal?.throwIfAborted();
 	if (!response.ok) {
@@ -282,7 +277,7 @@ export async function mintMetaApiKey(
 			response.status === 401 || response.status === 403
 				? `Meta session expired (HTTP ${response.status}); run /login meta again`
 				: `Meta API-key mint failed (HTTP ${response.status})`;
-		throw failure(message, body);
+		throw requestFailure(message, body);
 	}
 	if (!isNonBlankString(body.api_key)) {
 		const actionUrl = trustedHttpUrl(body.action_url);

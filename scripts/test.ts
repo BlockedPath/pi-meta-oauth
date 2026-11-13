@@ -2,6 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/** Set only by `--live`; the billable probes stay skipped without it. */
+const LIVE_PROBES_KEY = "PI_META_LIVE";
+
+/** Flags that change request wire shapes, so a developer export must not reach tests. */
+const BEHAVIOUR_KEYS = new Set(["META_MUSE_USER_AGENT", "META_TOOL_ALIASES"]);
+
 const ISOLATED_ENVIRONMENT_KEYS = new Set([
 	"HOME",
 	"USERPROFILE",
@@ -12,9 +18,8 @@ const ISOLATED_ENVIRONMENT_KEYS = new Set([
 	"PI_META_LIVE_API_KEY",
 	"META_API_KEY",
 	"MODEL_API_KEY",
-	"META_MUSE_USER_AGENT",
-	// Changes request wire names, so a developer export must not reach tests.
-	"META_TOOL_ALIASES",
+	LIVE_PROBES_KEY,
+	...BEHAVIOUR_KEYS,
 ]);
 
 /** Build a child-only environment without credentials or the caller's Pi home. */
@@ -35,6 +40,26 @@ export function createHermeticTestEnvironment(
 	return isolated;
 }
 
+/**
+ * Keep the caller's credentials and Pi home for the live probes, and turn the
+ * probes on. Behaviour flags are blanked rather than removed: live mode loads
+ * dotenv files, which would otherwise supply a removed name again.
+ */
+export function createLiveTestEnvironment(
+	environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+	const live: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(environment)) {
+		const name = key.toUpperCase();
+		if (!BEHAVIOUR_KEYS.has(name) && name !== LIVE_PROBES_KEY) {
+			live[key] = value;
+		}
+	}
+	for (const key of BEHAVIOUR_KEYS) live[key] = "";
+	live[LIVE_PROBES_KEY] = "1";
+	return live;
+}
+
 export async function runTests(arguments_: readonly string[]): Promise<number> {
 	const live = arguments_[0] === "--live";
 	const testArguments = live ? arguments_.slice(1) : arguments_;
@@ -52,7 +77,7 @@ export async function runTests(arguments_: readonly string[]): Promise<number> {
 			{
 				env: testHome
 					? createHermeticTestEnvironment(process.env, testHome)
-					: process.env,
+					: createLiveTestEnvironment(process.env),
 				stdin: "inherit",
 				stdout: "inherit",
 				stderr: "inherit",

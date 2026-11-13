@@ -179,8 +179,11 @@ The launcher clears Meta credentials in the child process, disables dotenv
 loading, and gives it an empty temporary home. Your environment and stored
 credentials are preserved. CI uses the same command and committed lockfile.
 
-Live probes require the explicit `bun run test:live` command. Direct `bun test`
-also bypasses isolation and can run these probes when credentials are available.
+Live probes run only when `PI_META_LIVE=1` is set, which `bun run test:live`
+does for you. Direct `bun test` bypasses the launcher's isolation but skips the
+probes, even when you are logged in, unless that variable is already in your
+environment; do not export it. `bun run test` always removes it. Live runs
+through the launcher ignore `META_MUSE_USER_AGENT` and `META_TOOL_ALIASES`.
 The cache probe makes two billable Responses requests plus one retry on a cache
 miss. The fingerprint probe makes two tiny Contributor-`max` requests; it sends
 the header directly, independently of `META_MUSE_USER_AGENT`. The catalog probe

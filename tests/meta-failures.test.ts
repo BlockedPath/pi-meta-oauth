@@ -384,6 +384,7 @@ describe("Meta device login failures", () => {
 			client_id: "1031625952748946",
 		});
 		expect(mint?.init?.method).toBe("POST");
+		expect(mint?.init?.redirect).toBe("manual");
 		expect(mint?.init?.body).toBe("{}");
 		const mintHeaders = new Headers(mint?.init?.headers);
 		expect(mintHeaders.get("Authorization")).toBe("Bearer identity-token");
@@ -449,6 +450,14 @@ describe("Meta API-key minting failures", () => {
 			"an expired session without detail",
 			jsonResponse({}, 401),
 			"Meta session expired (HTTP 401); run /login meta again",
+		],
+		[
+			"a redirect instead of following it with the identity token",
+			new Response(null, {
+				status: 302,
+				headers: { Location: "https://example.com/login" },
+			}),
+			"Meta API-key mint failed (HTTP 302)",
 		],
 	];
 	for (const [label, response, message] of failures) {
@@ -730,14 +739,22 @@ describe("Meta catalog refresh fallbacks", () => {
 			],
 			[{ type: "api_key", key: "plain-key" }, "plain-key"],
 		] as const) {
-			const signal = new AbortController().signal;
+			const controller = new AbortController();
 			const { fetchMock, requests } = scriptedFetch(
 				jsonResponse({ data: [{ id: "muse-spark-1.2" }] }),
 			);
-			await refreshMetaModels(context({ credential, signal }), fetchMock);
+			await refreshMetaModels(
+				context({ credential, signal: controller.signal }),
+				fetchMock,
+			);
 
 			expect(requests[0]?.url).toBe(META_MODEL_CATALOG_URL);
-			expect(requests[0]?.init?.signal).toBe(signal);
+			expect(requests[0]?.init?.redirect).toBe("manual");
+			// Derived from the host's signal, since the request has its own timeout.
+			const requestSignal = requests[0]?.init?.signal;
+			expect(requestSignal?.aborted).toBe(false);
+			controller.abort();
+			expect(requestSignal?.aborted).toBe(true);
 			const headers = new Headers(requests[0]?.init?.headers);
 			expect(headers.get("Authorization")).toBe(`Bearer ${key}`);
 			expect(headers.get("Accept")).toBe("application/json");
@@ -776,6 +793,59 @@ describe("Meta catalog refresh fallbacks", () => {
 			expect(writes).toBe(0);
 		});
 	}
+
+	test("restores and republishes the cached catalog when the request stalls", async () => {
+		const [template] = fallbackModels();
+		if (!template) throw new Error("Meta fallback model is required");
+		const stored: ModelsStoreEntry = {
+			models: [
+				{
+					...template,
+					id: "muse-cached",
+					name: "Muse Cached",
+					provider: META_PROVIDER_ID,
+					api: "openai-responses",
+					baseUrl: META_API_BASE_URL,
+				} as never,
+			],
+			checkedAt: 1,
+		};
+		const published: unknown[] = [];
+		const controller = new AbortController();
+		const { fetchMock, requests } = stallingFetch();
+		const models = await refreshMetaModels(
+			context({
+				signal: controller.signal,
+				stored,
+				publish: async (publication: unknown) => {
+					published.push(publication);
+					return true;
+				},
+			}),
+			fetchMock,
+			20,
+		);
+
+		// Our own timeout ended the request; the host's signal is untouched.
+		expect(requests).toHaveLength(1);
+		expect(controller.signal.aborted).toBe(false);
+		expect(models.map((model) => model.id)).toEqual(["muse-cached"]);
+		expect(published).toEqual([
+			{
+				persist: {
+					...stored,
+					lastModified: 0,
+					source: "pi-meta-oauth",
+				},
+			},
+		]);
+	});
+
+	test("falls back to the bundled models when the request stalls with nothing cached", async () => {
+		const { fetchMock } = stallingFetch();
+		const models = await refreshMetaModels(context(), fetchMock, 20);
+		expect(models).toEqual(fallbackModels());
+	});
 
 	test("rethrows when the signal aborts the request", async () => {
 		const controller = new AbortController();
