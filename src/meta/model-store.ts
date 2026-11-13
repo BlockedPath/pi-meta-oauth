@@ -6,10 +6,11 @@ import type {
 import {
 	META_API_BASE_URL,
 	META_API_VERSION,
+	META_CATALOG_TIMEOUT_MS,
 	META_MODEL_CATALOG_URL,
 	META_PROVIDER_ID,
 } from "./constants.ts";
-import { asRecord, errorDetail, responseBody } from "./http.ts";
+import { asRecord, requestFailure, requestJson } from "./http.ts";
 import {
 	fallbackModels,
 	restoreProviderModels,
@@ -140,6 +141,7 @@ function modelApiKey(context: CompatibleRefreshContext): string | undefined {
 export async function refreshMetaModels(
 	context: RefreshModelsContext,
 	fetchImpl: Fetch = fetch,
+	timeoutMs = META_CATALOG_TIMEOUT_MS,
 ): Promise<MetaProviderModel[]> {
 	// Pi 0.83 is outside the installed type declarations, but shares these runtime fields.
 	const compatibleContext = context as unknown as CompatibleRefreshContext;
@@ -149,19 +151,25 @@ export async function refreshMetaModels(
 	}
 
 	try {
-		const response = await fetchImpl(META_MODEL_CATALOG_URL, {
-			headers: {
-				Accept: "application/json",
-				Authorization: `Bearer ${apiKey}`,
-				"x-api-version": META_API_VERSION,
+		// A timeout of our own is not the host's cancellation, so it falls through
+		// to the cached catalog below instead of ending the refresh.
+		const { response, body } = await requestJson(
+			META_MODEL_CATALOG_URL,
+			{
+				headers: {
+					Accept: "application/json",
+					Authorization: `Bearer ${apiKey}`,
+					"x-api-version": META_API_VERSION,
+				},
 			},
-			signal: context.signal,
-		});
-		const body = await responseBody(response);
+			fetchImpl,
+			context.signal,
+			timeoutMs,
+		);
 		if (!response.ok) {
-			const detail = errorDetail(body);
-			throw new Error(
-				`Meta model catalog failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`,
+			throw requestFailure(
+				`Meta model catalog failed (HTTP ${response.status})`,
+				body,
 			);
 		}
 		const models = toProviderModels(body);

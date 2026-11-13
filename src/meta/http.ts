@@ -56,26 +56,63 @@ export async function withRequestTimeout<T>(
 	}
 }
 
-export async function postForm(
+/** Append the server's own explanation, when it sent one, to a failure message. */
+export function requestFailure(
+	message: string,
+	body: Record<string, unknown>,
+): Error {
+	const detail = errorDetail(body);
+	return new Error(`${message}${detail ? `: ${detail}` : ""}`);
+}
+
+type RequestOptions = Omit<
+	NonNullable<Parameters<Fetch>[1]>,
+	"redirect" | "signal"
+>;
+
+/**
+ * Send one credential-bearing request and decode its JSON object body, with the
+ * body read inside the same timeout. Redirects are never followed: a 3xx is
+ * reported as the failure it is instead of resending a token or key elsewhere.
+ */
+export async function requestJson(
 	url: string,
-	fields: Record<string, string>,
+	options: RequestOptions,
 	fetchImpl: Fetch,
 	signal?: AbortSignal,
 	timeoutMs = META_REQUEST_TIMEOUT_MS,
 ): Promise<{ response: Response; body: Record<string, unknown> }> {
 	return withRequestTimeout(signal, timeoutMs, async (requestSignal) => {
 		const response = await fetchImpl(url, {
+			...options,
+			redirect: "manual",
+			signal: requestSignal,
+		});
+		return { response, body: await responseBody(response) };
+	});
+}
+
+export function postForm(
+	url: string,
+	fields: Record<string, string>,
+	fetchImpl: Fetch,
+	signal?: AbortSignal,
+	timeoutMs = META_REQUEST_TIMEOUT_MS,
+): Promise<{ response: Response; body: Record<string, unknown> }> {
+	return requestJson(
+		url,
+		{
 			method: "POST",
 			headers: {
 				Accept: "application/json",
 				"Content-Type": "application/x-www-form-urlencoded",
 			},
 			body: new URLSearchParams(fields),
-			redirect: "manual",
-			signal: requestSignal,
-		});
-		return { response, body: await responseBody(response) };
-	});
+		},
+		fetchImpl,
+		signal,
+		timeoutMs,
+	);
 }
 
 export function delay(milliseconds: number): Promise<void> {

@@ -29,9 +29,9 @@ type MetaStream = ReturnType<typeof streamSimple>;
 /**
  * Restore Pi tool names and explain subscription attestation failures.
  * The loop drains upstream itself, so consumers that only await `result()`
- * still get the final message.
+ * still get the final message. Exported for tests, not from the entrypoint.
  */
-function forwardMetaStream(
+export function forwardMetaStream(
 	send: () => MetaStream,
 	model: { id: string; provider: string },
 	aliases?: MetaToolAliases,
@@ -39,18 +39,25 @@ function forwardMetaStream(
 	const downstream = createAssistantMessageEventStream();
 	void (async () => {
 		let partial: AssistantMessage | undefined;
+		let settled = false;
 		try {
 			for await (const upstreamEvent of send()) {
 				const event = aliases?.restoreEvent(upstreamEvent) ?? upstreamEvent;
-				if (event.type === "error") rewriteMetaAttestationError(event.error);
-				else if (event.type === "done")
+				if (event.type === "error") {
+					rewriteMetaAttestationError(event.error);
+					settled = true;
+				} else if (event.type === "done") {
 					rewriteMetaAttestationError(event.message);
-				else partial = event.partial;
+					settled = true;
+				} else partial = event.partial;
 				downstream.push(event);
 			}
+			// Ending a stream without a result leaves result() pending forever.
+			if (!settled) throw new Error("Meta stream ended without a result");
 		} catch (error) {
-			// Guard synchronous setup failures and broken upstream iterators so
-			// downstream result() cannot hang.
+			// pi-ai reports its own setup and transport failures as error events, so
+			// this covers a throw from send() or the loop above and a stream that
+			// ended early: downstream always settles with an error message.
 			const message: AssistantMessage = partial ?? {
 				role: "assistant",
 				content: [],

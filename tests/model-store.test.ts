@@ -109,16 +109,22 @@ describe("Meta catalog persistence compatibility", () => {
 				| {
 						url: string;
 						headers: Headers;
+						redirect: string | undefined;
 						signal: AbortSignal | null | undefined;
 				  }
 				| undefined;
-			const context = refreshContext({ credential });
+			const controller = new AbortController();
+			const context = refreshContext({
+				credential,
+				signal: controller.signal,
+			});
 			const models = await refreshMetaModels(
 				context,
 				fetchMock(async (input, init) => {
 					request = {
 						url: String(input),
 						headers: new Headers(init?.headers),
+						redirect: init?.redirect,
 						signal: init?.signal,
 					};
 					return jsonResponse({ data: [{ id: "muse-fresh" }] });
@@ -129,7 +135,12 @@ describe("Meta catalog persistence compatibility", () => {
 				`Bearer ${credential.type === "api_key" ? credential.key : credential.access}`,
 			);
 			expect(request?.headers.get("x-api-version")).toBe("1.0.0");
-			expect(request?.signal).toBe(context.signal);
+			expect(request?.redirect).toBe("manual");
+			// The request runs under its own timeout too, so its signal is derived
+			// from the host's rather than identical to it.
+			expect(request?.signal?.aborted).toBe(false);
+			controller.abort();
+			expect(request?.signal?.aborted).toBe(true);
 			expect(models.map(({ id }) => id)).toEqual(["muse-fresh"]);
 		});
 	}

@@ -23,14 +23,27 @@ the chat member before applying `Omit`, which keeps `reasoning`,
 `thinkingLevelMap`, `contextWindow`, and `maxTokens` on every supported Pi
 version (the narrowing is a no-op on Pi 0.83–0.87). Tests that read models back
 out of a `ModelsStoreEntry` must narrow the same way, since that list holds
-every model type on Pi 1.x. The CI matrix pins each supported Pi line and the
-lockfile's version is the leg that skips the compatibility reinstall; add a leg
-when widening the peer range.
+every model type on Pi 1.x. The Pi matrix lives in
+`.github/workflows/pi-compatibility.yml`, which both CI and Publish call, so a
+tag is verified against every leg and only publishes from a commit on `main`.
+It pins each supported Pi line; the `lockfile` leg tests the committed dev pin
+without a reinstall. Add a leg when widening the peer range, and add the old pin
+as its own leg when bumping the dev pin past a line that must stay covered.
 
 Use `bun run check` for lint, strict typecheck, and hermetic tests. `bun run test`
 runs through `scripts/test.ts`, which strips credentials and isolates the child
-home without changing the caller. Direct `bun test` bypasses that protection.
+home without changing the caller. Direct `bun test` bypasses that isolation, but
+the billable live probes still skip: only `bun run test:live` sets
+`PI_META_LIVE=1`, and `tests/live-key.ts` resolves no credential without it.
+Live mode keeps credentials and the Pi home, and blanks `META_MUSE_USER_AGENT`
+and `META_TOOL_ALIASES` so the wire-name assertions stay deterministic.
 Run `bun run test:live` only when live billable probes are explicitly requested.
+
+Every credential-bearing request (device flow, key mint, model catalog) goes
+through `requestJson()` in `src/meta/http.ts`: one timeout covering the body
+read, and `redirect: "manual"` so a token or key is never resent elsewhere. The
+catalog request has its own `META_CATALOG_TIMEOUT_MS`; that timeout is not a host
+cancellation, so it restores and republishes the cached catalog.
 Install dependencies with `bun install --frozen-lockfile`.
 
 ## OAuth flow
@@ -50,7 +63,12 @@ Hermetic OAuth and catalog tests live in `tests/meta.test.ts`. Failure-path and 
 
 Muse Spark on `api.meta.ai` returns no useful cache hits on `/v1/chat/completions`. Keep the provider on `/v1/responses` and preserve `applyMetaResponsesCacheHints()` in the provider's request-local `streamSimple` adapter, after the caller's payload callback. It sets `prompt_cache_retention: "24h"` only when the payload has no explicit retention and removes `reasoning` when effort is `"none"` or missing because Meta rejects that shape. Do not use session-scoped request hooks for these adjustments: `ctx.model` can change while a request is in flight.
 
-`tests/meta-cache.test.ts` contains hermetic wire-contract coverage plus an optional live cache probe. The live probe resolves a key from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired `meta.access` entry in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`). It makes real billable requests whenever a credential resolves; do not put a live key in CI.
+`tests/meta-cache.test.ts` contains hermetic wire-contract coverage plus an optional live cache probe. The live probe resolves a key from `PI_META_LIVE_API_KEY`, `META_API_KEY`, `MODEL_API_KEY`, or an unexpired `meta.access` entry in Pi's `auth.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`). It makes real billable requests under `bun run test:live` whenever a credential resolves; do not put a live key in CI.
+
+`forwardMetaStream()` in `src/meta/provider.ts` must always settle downstream:
+an upstream that ends without `done` or `error`, or a throw while sending,
+becomes an error event. It is exported for `tests/meta-cache.test.ts`, not from
+the entrypoint.
 
 ## Tool name aliases
 
@@ -75,4 +93,4 @@ Since at least 2026-10-23, `GET https://api.meta.ai/v1/models` returns bare `{id
 
 The catalog also lists non-token models that Meta bills per generated image (`muse-image-*`), per hour of audio (`muse-voice-*`), or per video frame (`sam-*`). `isNonChatModelId()` filters those families by prefix in both `toProviderModels()` and `restoreProviderModels()`, so a new version stays hidden without a code change and an entry cached by an earlier release disappears on restore. Keep the filter prefix-based. On restore, bundled IDs take name, cost, and input from `FALLBACK_DEFINITIONS` (a cached copy is an older release's bundled value or its default) and keep cached limits, effort names, headers, and compat; unknown IDs restore every cached field.
 
-Every live probe must resolve its key through `tests/live-key.ts` (env, then an unexpired `meta.access` in Pi's agent-dir `auth.json`) so a plain `bun run test:live` runs all of them; the catalog canary in `tests/meta.test.ts` fails when a live ID has neither a bundled definition nor a non-chat prefix.
+Every live probe must resolve its key through `tests/live-key.ts` (env, then an unexpired `meta.access` in Pi's agent-dir `auth.json`) so a plain `bun run test:live` runs all of them and nothing else can reach a live credential; the catalog canary in `tests/meta.test.ts` fails when a live ID has neither a bundled definition nor a non-chat prefix.

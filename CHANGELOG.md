@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The API-key mint and model-catalog requests no longer follow redirects, so a 3xx is reported as a failure instead of resending the identity token or API key.
+- The model-catalog request has its own 10-second timeout. A stalled request now restores the cached catalog instead of waiting on the host.
+- A Meta stream that ends without a final result now reports an error instead of leaving the request pending.
+
+### Changed
+
+- Live billable test probes run only under `bun run test:live`; a direct `bun test` on a logged-in machine skips them. Live runs ignore `META_MUSE_USER_AGENT` and `META_TOOL_ALIASES`.
+- Publishing verifies every supported Pi version and requires the tagged commit to be on `main`.
+
 ## [0.7.7] - 2026-11-02
 
 ### Added

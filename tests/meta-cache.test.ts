@@ -1,12 +1,14 @@
 /// <reference types="bun-types" />
 import { describe, expect, test } from "bun:test";
 import type {
+	AssistantMessage,
 	Context,
 	Model,
 	SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/compat";
 import {
 	applyMetaResponsesCacheHints,
 	applyMetaUserAgentFingerprint,
@@ -14,6 +16,7 @@ import {
 	isDirectMetaModelApiUrl,
 	isMuseUserAgentEnabled,
 	META_API_BASE_URL,
+	META_ATTESTATION_DENIED_MESSAGE,
 	META_PROMPT_CACHE_RETENTION,
 	META_PROVIDER_ID,
 	MUSE_USER_AGENT,
@@ -22,6 +25,7 @@ import {
 	toProviderModels,
 } from "../extensions/meta.ts";
 import { MAX_EFFORT_MODEL_IDS } from "../src/meta/muse-policy.ts";
+import { forwardMetaStream } from "../src/meta/provider.ts";
 import { resolveLiveMetaApiKey } from "./live-key.ts";
 import { withMuseUserAgent } from "./muse-env.ts";
 
@@ -485,6 +489,56 @@ describe("Meta subscription attestation failures", () => {
 			"No API key for provider: meta",
 		);
 		expect(finalMessage.errorMessage).not.toContain("Set META_API_KEY");
+	});
+
+	test("settles with an error when upstream ends without a result", async () => {
+		const model = museModel();
+		const partial = {
+			role: "assistant",
+			content: [{ type: "text", text: "partial" }],
+			api: "openai-responses",
+			provider: model.provider,
+			model: model.id,
+			stopReason: "stop",
+			timestamp: Date.now(),
+		} as unknown as AssistantMessage;
+		const upstream = createAssistantMessageEventStream();
+		upstream.push({ type: "start", partial });
+		upstream.end();
+
+		const stream = forwardMetaStream(() => upstream, model);
+		const types: string[] = [];
+		for await (const event of stream) types.push(event.type);
+		// Without the guard result() never resolves and this test times out.
+		const finalMessage = await stream.result();
+		expect(types).toEqual(["start", "error"]);
+		expect(finalMessage.stopReason).toBe("error");
+		expect(finalMessage.errorMessage).toBe(
+			"Meta stream ended without a result",
+		);
+		expect(finalMessage.content).toEqual([{ type: "text", text: "partial" }]);
+	});
+
+	test("settles with an error when sending throws before any event", async () => {
+		const model = museModel();
+		const failures: Array<[string, string]> = [
+			["connection reset", "connection reset"],
+			["403 client_attestation_denied", META_ATTESTATION_DENIED_MESSAGE],
+		];
+		for (const [thrown, reported] of failures) {
+			const stream = forwardMetaStream(() => {
+				throw new Error(thrown);
+			}, model);
+			const finalMessage = await stream.result();
+			expect(finalMessage).toMatchObject({
+				role: "assistant",
+				content: [],
+				provider: META_PROVIDER_ID,
+				model: model.id,
+				stopReason: "error",
+				errorMessage: reported,
+			});
+		}
 	});
 });
 

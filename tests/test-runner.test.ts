@@ -4,16 +4,21 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHermeticTestEnvironment } from "../scripts/test.ts";
+import {
+	createHermeticTestEnvironment,
+	createLiveTestEnvironment,
+} from "../scripts/test.ts";
 
 const launcher = fileURLToPath(new URL("../scripts/test.ts", import.meta.url));
 const credentialKeys = [
 	"PI_META_LIVE_API_KEY",
 	"META_API_KEY",
 	"MODEL_API_KEY",
-	"META_MUSE_USER_AGENT",
-	"META_TOOL_ALIASES",
 ];
+/** Flags that change request wire shapes; no test run inherits them. */
+const behaviourKeys = ["META_MUSE_USER_AGENT", "META_TOOL_ALIASES"];
+const liveProbesKey = "PI_META_LIVE";
+const inheritedKeys = [...credentialKeys, ...behaviourKeys];
 
 async function runFixture(
 	source: string,
@@ -25,7 +30,9 @@ async function runFixture(
 		await writeFile(fixture, source);
 		await writeFile(
 			join(fixtureHome, ".env"),
-			credentialKeys.map((key) => `${key}=from-dotenv`).join("\n"),
+			[...inheritedKeys, liveProbesKey]
+				.map((key) => `${key}=from-dotenv`)
+				.join("\n"),
 		);
 		const authFile = join(fixtureHome, ".pi", "agent", "auth.json");
 		await mkdir(dirname(authFile), { recursive: true });
@@ -43,8 +50,9 @@ async function runFixture(
 					USERPROFILE: fixtureHome,
 					PI_CODING_AGENT_DIR: dirname(authFile),
 					...Object.fromEntries(
-						credentialKeys.map((key) => [key, "fixture-key"]),
+						inheritedKeys.map((key) => [key, "fixture-key"]),
 					),
+					[liveProbesKey]: "fixture-key",
 				},
 				stdout: "pipe",
 				stderr: "pipe",
@@ -75,6 +83,7 @@ describe("hermetic test launcher", () => {
 			PI_META_LIVE_API_KEY: "caller-key",
 			META_MUSE_USER_AGENT: "1",
 			META_TOOL_ALIASES: "grep=search_text",
+			PI_META_LIVE: "1",
 		};
 		const original = { ...inherited };
 		expect(createHermeticTestEnvironment(inherited, "test-home")).toEqual({
@@ -85,13 +94,36 @@ describe("hermetic test launcher", () => {
 		expect(inherited).toEqual(original);
 	});
 
+	test("live mode keeps credentials, blanks behaviour flags, and turns the probes on", () => {
+		const inherited = {
+			Path: "tool-path",
+			HOME: "caller-home",
+			PI_CODING_AGENT_DIR: "caller-agent",
+			META_API_KEY: "caller-key",
+			meta_muse_user_agent: "1",
+			META_TOOL_ALIASES: "bash=run_cmd",
+			pi_meta_live: "0",
+		};
+		const original = { ...inherited };
+		expect(createLiveTestEnvironment(inherited)).toEqual({
+			Path: "tool-path",
+			HOME: "caller-home",
+			PI_CODING_AGENT_DIR: "caller-agent",
+			META_API_KEY: "caller-key",
+			META_MUSE_USER_AGENT: "",
+			META_TOOL_ALIASES: "",
+			PI_META_LIVE: "1",
+		});
+		expect(inherited).toEqual(original);
+	});
+
 	test("isolates the child home, ignores dotenv, forwards test arguments, and cleans up", async () => {
 		const result = await runFixture(
 			`import { expect, test } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 test("selected", () => {
-	for (const key of ${JSON.stringify(credentialKeys)}) expect(process.env[key]).toBeUndefined();
+	for (const key of ${JSON.stringify([...inheritedKeys, liveProbesKey])}) expect(process.env[key]).toBeUndefined();
 	expect(process.env.PI_CODING_AGENT_DIR).toBeUndefined();
 	expect(homedir()).toBe(process.env.HOME);
 	expect(homedir()).toBe(process.env.USERPROFILE);
@@ -125,6 +157,9 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 test("live fixture", () => {
 	for (const key of ${JSON.stringify(credentialKeys)}) expect(process.env[key]).toBe("fixture-key");
+	// Blank, and not supplied again by the dotenv file that live mode loads.
+	for (const key of ${JSON.stringify(behaviourKeys)}) expect(process.env[key]).toBe("");
+	expect(process.env.${liveProbesKey}).toBe("1");
 	expect(homedir()).toBe(process.env.USERPROFILE);
 	expect(existsSync(homedir() + "/.pi/agent/auth.json")).toBe(true);
 });`,

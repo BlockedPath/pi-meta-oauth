@@ -21,15 +21,21 @@ export function piAgentDir(env: NodeJS.ProcessEnv = process.env): string {
 	return configured;
 }
 
+/** Set to `1` by `bun run test:live`; no other run may reach a live credential. */
+export const LIVE_PROBES_ENV_VAR = "PI_META_LIVE";
+
 /**
  * Resolve the credential for the billable live probes: an explicit env key,
  * then an unexpired `meta.access` entry from the local `/login meta`. Every
  * live test must use this, so a plain `bun run test:live` exercises all of
- * them; a probe keyed on one env var alone silently skips.
+ * them; a probe keyed on one env var alone silently skips. Nothing resolves
+ * unless the launcher turned the probes on, so a direct `bun test` on a
+ * logged-in machine stays free.
  */
 export function resolveLiveMetaApiKey(
 	env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
+	if (env[LIVE_PROBES_ENV_VAR] !== "1") return undefined;
 	for (const value of [
 		env.PI_META_LIVE_API_KEY,
 		env.META_API_KEY,

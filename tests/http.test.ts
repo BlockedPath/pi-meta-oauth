@@ -3,6 +3,8 @@ import {
 	errorDetail,
 	postForm,
 	RequestTimeoutError,
+	requestFailure,
+	requestJson,
 	responseBody,
 } from "../src/meta/http.ts";
 import type { Fetch } from "../src/meta/types.ts";
@@ -88,4 +90,56 @@ test("device form transport leaves caller cancellation to the caller", async () 
 	const error = await pending.catch((reason: unknown) => reason);
 	expect(error).not.toBeInstanceOf(RequestTimeoutError);
 	expect(error).toBe(controller.signal.reason);
+});
+
+test("JSON transport never follows redirects and keeps the caller's request options", async () => {
+	let seen: RequestInit | undefined;
+	const fetchImpl = (async (_url, init) => {
+		seen = init;
+		return new Response(null, {
+			status: 302,
+			headers: { Location: "https://example.com/elsewhere" },
+		});
+	}) as Fetch;
+	const { response, body } = await requestJson(
+		"https://api.meta.ai/test",
+		{ method: "POST", headers: { Authorization: "Bearer secret" }, body: "{}" },
+		fetchImpl,
+	);
+	expect(seen?.redirect).toBe("manual");
+	expect(seen?.method).toBe("POST");
+	expect(seen?.body).toBe("{}");
+	expect(new Headers(seen?.headers).get("Authorization")).toBe("Bearer secret");
+	expect(seen?.signal).toBeInstanceOf(AbortSignal);
+	expect(response.status).toBe(302);
+	expect(body).toEqual({});
+});
+
+test("JSON transport bounds the body read with the same timeout", async () => {
+	const fetchImpl = (async (_url, init) => {
+		const signal = init?.signal;
+		const stalledBody = new ReadableStream<Uint8Array>({
+			start(controller) {
+				signal?.addEventListener("abort", () =>
+					controller.error(signal.reason),
+				);
+			},
+		});
+		return new Response(stalledBody);
+	}) as Fetch;
+	const error = await requestJson(
+		"https://api.meta.ai/test",
+		{},
+		fetchImpl,
+		undefined,
+		20,
+	).catch((reason: unknown) => reason);
+	expect(error).toBeInstanceOf(RequestTimeoutError);
+});
+
+test("appends the server's detail to a failure message only when present", () => {
+	expect(requestFailure("Request failed", { message: " why " }).message).toBe(
+		"Request failed: why",
+	);
+	expect(requestFailure("Request failed", {}).message).toBe("Request failed");
 });

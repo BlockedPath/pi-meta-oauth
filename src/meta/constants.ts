@@ -14,6 +14,11 @@ export const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 export const API_KEY_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** Bound each OAuth or mint request, matching Pi's built-in Meta flow. */
 export const META_REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Bound the catalog request itself: not every Pi refresh path supplies a
+ * deadline, and a stall that ends here still restores the cached catalog.
+ */
+export const META_CATALOG_TIMEOUT_MS = 10_000;
 
 /**
  * Captured Muse CLI fingerprint. Preserve its bytes, including the platform
