@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Live billable test probes run only under `bun run test:live`; a direct `bun test` on a logged-in machine skips them. Live runs ignore `META_MUSE_USER_AGENT` and `META_TOOL_ALIASES`.
+- Live billable test probes run only when `PI_META_LIVE=1`, which `bun run test:live` sets; a direct `bun test` on a logged-in machine skips them. Live runs ignore `META_MUSE_USER_AGENT` and `META_TOOL_ALIASES`.
 - Publishing verifies every supported Pi version and requires the tagged commit to be on `main`.
 
 ## [0.7.7] - 2026-11-02

@@ -26,7 +26,7 @@ Procedure:
 Hard rules:
 
 - Never `git commit`, `git add`, or push. Editing the working tree is fine; leaving it committed is not your job.
-- In pi-meta-oauth, use `bun run test` (or `bun run test <file>` for a focused run). Its launcher strips credentials, disables dotenv loading, and isolates the child home. Direct `bun test` bypasses isolation; the billable live probes still skip without the launcher's `--live`. Use `bun run test:live` only when explicitly asked. Use `bun run check` for the full lint/typecheck/test gate.
+- In pi-meta-oauth, use `bun run test` (or `bun run test <file>` for a focused run). Its launcher strips credentials, disables dotenv loading, and isolates the child home. Direct `bun test` bypasses isolation; the billable live probes skip unless `PI_META_LIVE=1` is set, which only the launcher's `--live` should do, so never set it yourself. Use `bun run test:live` only when explicitly asked. Use `bun run check` for the full lint/typecheck/test gate.
 - Never weaken or delete a test to make it pass. If the only way to green is changing the test, stop and report it as a decision.
 - If fixing a failure requires a product, architecture, or scope decision you were not given, stop and report the exact choice needed instead of picking one silently.
 - If you've made 3 consecutive failed fix attempts on the same test, stop and report what you tried and what you suspect rather than spiraling.

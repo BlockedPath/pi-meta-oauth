@@ -21,7 +21,10 @@ export function piAgentDir(env: NodeJS.ProcessEnv = process.env): string {
 	return configured;
 }
 
-/** Set to `1` by `bun run test:live`; no other run may reach a live credential. */
+/**
+ * The live-probe gate. `bun run test:live` sets it to `1` and the hermetic runner
+ * strips it; a run that merely inherits it is live too, so never export it.
+ */
 export const LIVE_PROBES_ENV_VAR = "PI_META_LIVE";
 
 /**

@@ -33,8 +33,9 @@ as its own leg when bumping the dev pin past a line that must stay covered.
 Use `bun run check` for lint, strict typecheck, and hermetic tests. `bun run test`
 runs through `scripts/test.ts`, which strips credentials and isolates the child
 home without changing the caller. Direct `bun test` bypasses that isolation, but
-the billable live probes still skip: only `bun run test:live` sets
-`PI_META_LIVE=1`, and `tests/live-key.ts` resolves no credential without it.
+the billable live probes still skip: `tests/live-key.ts` resolves no credential
+unless `PI_META_LIVE=1`, which `bun run test:live` sets and the hermetic runner
+strips. The variable is the gate, so never export it or set it by hand.
 Live mode keeps credentials and the Pi home, and blanks `META_MUSE_USER_AGENT`
 and `META_TOOL_ALIASES` so the wire-name assertions stay deterministic.
 Run `bun run test:live` only when live billable probes are explicitly requested.
@@ -93,4 +94,4 @@ Since at least 2026-10-23, `GET https://api.meta.ai/v1/models` returns bare `{id
 
 The catalog also lists non-token models that Meta bills per generated image (`muse-image-*`), per hour of audio (`muse-voice-*`), or per video frame (`sam-*`). `isNonChatModelId()` filters those families by prefix in both `toProviderModels()` and `restoreProviderModels()`, so a new version stays hidden without a code change and an entry cached by an earlier release disappears on restore. Keep the filter prefix-based. On restore, bundled IDs take name, cost, and input from `FALLBACK_DEFINITIONS` (a cached copy is an older release's bundled value or its default) and keep cached limits, effort names, headers, and compat; unknown IDs restore every cached field.
 
-Every live probe must resolve its key through `tests/live-key.ts` (env, then an unexpired `meta.access` in Pi's agent-dir `auth.json`) so a plain `bun run test:live` runs all of them and nothing else can reach a live credential; the catalog canary in `tests/meta.test.ts` fails when a live ID has neither a bundled definition nor a non-chat prefix.
+Every live probe must resolve its key through `tests/live-key.ts` (env, then an unexpired `meta.access` in Pi's agent-dir `auth.json`) so a plain `bun run test:live` runs all of them and no run without `PI_META_LIVE=1` can reach a live credential; the catalog canary in `tests/meta.test.ts` fails when a live ID has neither a bundled definition nor a non-chat prefix.
